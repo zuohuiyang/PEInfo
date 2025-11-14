@@ -1,0 +1,67 @@
+PE Analyzer GUI Interface - Complete!
+=====================================
+
+The new GUI interface has been successfully developed with the following features:
+
+MAIN FEATURES:
+1. Tabbed Interface
+   - PE Analysis tab: Analyze PE files with tree view display
+   - Hash Calculator tab: Calculate MD5, SHA1, SHA256 hashes
+
+2. PE Analysis Functions
+   - File path input field
+   - Browse button (opens file dialog)
+   - Analyze PE button (parses PE file)
+   - Tree view control displays import table information
+   - Drag-and-drop file support (automatically analyzes dropped files)
+
+3. Hash Calculator Functions
+   - Multi-line text input field
+   - Algorithm selection dropdown (MD5/SHA1/SHA256)
+   - Calculate Hash button
+   - Read-only output field for hash results
+
+4. User Interface Features
+   - Tab switching with mouse clicks
+   - Window resizing support
+   - Unicode support (handles Chinese file paths)
+   - File drag-and-drop functionality
+   - Responsive layout that adapts to window size
+
+5. Technical Specifications
+   - 32-bit Windows application
+   - C++17 standard compliance
+   - Static linking (no external dependencies)
+   - Native Win32 API implementation
+   - Visual Studio 2022 compilation
+
+TESTING INSTRUCTIONS:
+
+1. Start the program: Double-click PEAnalyzer.exe
+2. PE Analysis Testing:
+   - Click 'Browse...' to select an .exe or .dll file
+   - Or drag and drop a file onto the window
+   - Click 'Analyze PE' to view import table information
+   - Tree view will show DLLs and imported functions
+
+3. Hash Calculator Testing:
+   - Switch to 'Hash Calculator' tab
+   - Enter text in the input field
+   - Select hash algorithm from dropdown
+   - Click 'Calculate Hash' to see the result
+
+4. Interface Testing:
+   - Resize the window to observe layout changes
+   - Switch between tabs to see different functions
+   - Test file drag-and-drop functionality
+   - Try with files containing Unicode characters
+
+PROGRAM LOCATION:
+C:\project\petools\build\Release\PEAnalyzer.exe
+
+The GUI now matches professional PE analysis tools with proper controls,
+tabs, and functionality. All interface elements are interactive and
+provide the expected user experience for PE analysis and hash calculation.
+
+You can now perform interface testing by clicking buttons, switching
+tabs, dragging files, and interacting with all the controls!

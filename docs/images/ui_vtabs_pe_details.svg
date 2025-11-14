@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360">
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f8f9fb"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="480" height="360" fill="#f4f6f8"/>
+  <text x="16" y="24" font-family="Segoe UI" font-size="14" fill="#333">File Format Identifier</text>
+  <!-- 工具栏 -->
+  <rect x="16" y="36" width="448" height="36" rx="8" fill="url(#card)" stroke="#d0d6dc"/>
+  <text x="28" y="58" font-family="Segoe UI" font-size="12" fill="#555">Path</text>
+  <rect x="70" y="44" width="300" height="20" rx="4" fill="#fff" stroke="#c7cdd3"/>
+  <rect x="380" y="44" width="68" height="20" rx="4" fill="#e9eef3" stroke="#c7cdd3"/>
+  <text x="402" y="58" font-family="Segoe UI" font-size="12" fill="#333">...</text>
+  <!-- 左侧导航：PE Info 选中 -->
+  <rect x="16" y="84" width="140" height="260" rx="8" fill="url(#card)" stroke="#d0d6dc"/>
+  <rect x="24" y="96" width="124" height="28" rx="6" fill="#e9eef3" stroke="#c7cdd3"/>
+  <rect x="24" y="96" width="3" height="28" fill="#2ca02c"/>
+  <text x="34" y="114" font-family="Segoe UI" font-size="12" fill="#333">PE Info</text>
+  <rect x="24" y="132" width="124" height="28" rx="6" fill="#ffffff" stroke="#c7cdd3"/>
+  <text x="34" y="150" font-family="Segoe UI" font-size="12" fill="#555">Imports</text>
+  <rect x="24" y="168" width="124" height="28" rx="6" fill="#ffffff" stroke="#c7cdd3"/>
+  <text x="34" y="186" font-family="Segoe UI" font-size="12" fill="#555">Hash</text>
+  <!-- 右侧内容：PE 详情（无按钮） -->
+  <rect x="164" y="84" width="300" height="260" rx="10" fill="url(#card)" stroke="#d0d6dc"/>
+  <text x="176" y="104" font-family="Segoe UI" font-size="12" fill="#333">PE Header Informations [HEX]</text>
+  <!-- DOS Header 区块 -->
+  <rect x="172" y="112" width="284" height="64" rx="6" fill="#fff" stroke="#c7cdd3"/>
+  <text x="178" y="126" font-family="Segoe UI" font-size="11" fill="#555">Dos Header</text>
+  <text x="178" y="140" font-family="Segoe UI" font-size="11" fill="#333">Magic: 5A4D   Bytes on last page: 0090   Pages in file: 0003</text>
+  <text x="178" y="154" font-family="Segoe UI" font-size="11" fill="#333">Relocations: 0000   Size of header: 004C   Checksum: 0000</text>
+  <!-- File Header 区块 -->
+  <rect x="172" y="180" width="284" height="64" rx="6" fill="#fff" stroke="#c7cdd3"/>
+  <text x="178" y="194" font-family="Segoe UI" font-size="11" fill="#555">Image File Header</text>
+  <text x="178" y="208" font-family="Segoe UI" font-size="11" fill="#333">Machine: 014C   Number Of Sections: 0004   TimeDateStamp: 42D911E5</text>
+  <text x="178" y="222" font-family="Segoe UI" font-size="11" fill="#333">Characteristics: 010F   Size of Optional Header: 00E0</text>
+  <!-- Optional Header 关键字段行 -->
+  <rect x="172" y="248" width="284" height="88" rx="6" fill="#fff" stroke="#c7cdd3"/>
+  <text x="178" y="262" font-family="Segoe UI" font-size="11" fill="#555">Image Optional Header</text>
+  <text x="178" y="276" font-family="Segoe UI" font-size="11" fill="#333">Entry Point: 0003728A   Image Base: 00400000   Size Of Image: 000A3000</text>
+  <text x="178" y="292" font-family="Segoe UI" font-size="11" fill="#333">Subsystem: 0002   DLL Flags: 0000   Loader Flags: 00000000</text>
+  <text x="178" y="308" font-family="Segoe UI" font-size="11" fill="#333">Number Of Rva And Sizes: 0010</text>
+</svg>

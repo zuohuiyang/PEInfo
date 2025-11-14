@@ -1,0 +1,66 @@
+#pragma once
+
+#include "targetver.h"
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <commctrl.h>
+#include <shlobj.h>
+#include <shellapi.h>
+#include <string>
+#include <vector>
+#include <memory>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <chrono>
+#include <map>
+
+#pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "shell32.lib")
+
+#define MAX_LOADSTRING 100
+#define IDI_MAIN_ICON 101
+#define IDR_MAIN_MENU 102
+#define IDD_MAIN_DIALOG 103
+
+#define IDC_TAB_CONTROL 1001
+#define IDC_PE_GROUPBOX 1002
+#define IDC_PE_FILE_PATH 1003
+#define IDC_PE_BROWSE_BUTTON 1004
+#define IDC_PE_ANALYZE_BUTTON 1005
+#define IDC_PE_TREE_VIEW 1006
+#define IDC_PE_STATUS 1007
+
+#define IDC_HASH_GROUPBOX 1010
+#define IDC_HASH_DATA_TYPE 1011
+#define IDC_HASH_FILE_PATH 1012
+#define IDC_HASH_BROWSE_BUTTON 1013
+#define IDC_HASH_HMAC_CHECK 1014
+#define IDC_HASH_KEY_TYPE 1015
+#define IDC_HASH_KEY_VALUE 1016
+#define IDC_HASH_MD5_CHECK 1017
+#define IDC_HASH_MD5_RESULT 1018
+#define IDC_HASH_SHA1_CHECK 1019
+#define IDC_HASH_SHA1_RESULT 1020
+#define IDC_HASH_SHA256_CHECK 1021
+#define IDC_HASH_SHA256_RESULT 1022
+#define IDC_HASH_SHA384_CHECK 1023
+#define IDC_HASH_SHA384_RESULT 1024
+#define IDC_HASH_SHA512_CHECK 1025
+#define IDC_HASH_SHA512_RESULT 1026
+#define IDC_HASH_TIME_LABEL 1027
+#define IDC_HASH_CALCULATE_BUTTON 1028
+#define IDC_HASH_CLEAR_BUTTON 1029
+
+#define IDM_FILE_EXIT 40001
+#define IDM_HELP_ABOUT 40002
+
+#define WM_UPDATE_STATUS (WM_USER + 1)
+#define WM_UPDATE_HASH_RESULT (WM_USER + 2)
+
+#ifdef _UNICODE
+typedef std::wstring tstring;
+#else
+typedef std::string tstring;
+#endif

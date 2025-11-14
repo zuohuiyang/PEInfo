@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360">
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f8f9fb"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景与标题 -->
+  <rect x="0" y="0" width="480" height="360" fill="#f4f6f8"/>
+  <text x="16" y="24" font-family="Segoe UI" font-size="14" fill="#333">File Format Identifier</text>
+
+  <!-- 顶部工具栏：Path + Edit + ... -->
+  <rect x="16" y="36" width="448" height="36" rx="8" fill="url(#card)" stroke="#d0d6dc"/>
+  <text x="28" y="58" font-family="Segoe UI" font-size="12" fill="#555">Path</text>
+  <rect x="70" y="44" width="300" height="20" rx="4" fill="#fff" stroke="#c7cdd3"/>
+  <rect x="380" y="44" width="68" height="20" rx="4" fill="#e9eef3" stroke="#c7cdd3"/>
+  <text x="402" y="58" font-family="Segoe UI" font-size="12" fill="#333">...</text>
+
+  <!-- 左侧导航（3个Tab） -->
+  <rect x="16" y="84" width="140" height="260" rx="8" fill="url(#card)" stroke="#d0d6dc"/>
+  <!-- 选中态PE Info -->
+  <rect x="24" y="96" width="124" height="28" rx="6" fill="#e9eef3" stroke="#c7cdd3"/>
+  <rect x="24" y="96" width="3" height="28" fill="#2ca02c"/>
+  <text x="34" y="114" font-family="Segoe UI" font-size="12" fill="#333">PE Info</text>
+  <!-- Imports -->
+  <rect x="24" y="132" width="124" height="28" rx="6" fill="#ffffff" stroke="#c7cdd3"/>
+  <text x="34" y="150" font-family="Segoe UI" font-size="12" fill="#555">Imports</text>
+  <!-- Hash -->
+  <rect x="24" y="168" width="124" height="28" rx="6" fill="#ffffff" stroke="#c7cdd3"/>
+  <text x="34" y="186" font-family="Segoe UI" font-size="12" fill="#555">Hash</text>
+
+  <!-- 右侧内容卡片（PE Info页） -->
+  <rect x="164" y="84" width="300" height="260" rx="10" fill="url(#card)" stroke="#d0d6dc"/>
+  <text x="176" y="104" font-family="Segoe UI" font-size="12" fill="#333">PE Basic Information</text>
+  <!-- 左列 -->
+  <text x="176" y="126" font-family="Segoe UI" font-size="12" fill="#333">Entry Point(RVA): 0x004043610</text>
+  <text x="176" y="146" font-family="Segoe UI" font-size="12" fill="#333">Entry Point(RAW): 0x004042A10</text>
+  <text x="176" y="166" font-family="Segoe UI" font-size="12" fill="#333">Linker Info.: 14.0</text>
+  <!-- 右列 -->
+  <text x="310" y="126" font-family="Segoe UI" font-size="12" fill="#333">EP Section: .text</text>
+  <text x="310" y="146" font-family="Segoe UI" font-size="12" fill="#333">First Bytes: 48,83,EC,28</text>
+  <text x="310" y="166" font-family="Segoe UI" font-size="12" fill="#333">SubSystem: Win32 GUI</text>
+  <!-- 底部MD5与Notice -->
+  <text x="176" y="200" font-family="Segoe UI" font-size="12" fill="#333">MD5: 14D06B8C...A90A9</text>
+  <text x="176" y="220" font-family="Segoe UI" font-size="12" fill="#333">Notice: 0x... extra bytes found, starting at offset 0x...</text>
+
+  <!-- 右侧内容卡片示意（Imports页 / Hash页 轮廓，非选中态灰显文本） -->
+  <text x="176" y="246" font-family="Segoe UI" font-size="12" fill="#999">Imports: TreeView of imported DLLs and functions</text>
+  <text x="176" y="266" font-family="Segoe UI" font-size="12" fill="#999">Hash: Algorithm, Input, Calculate, Output</text>
+</svg>

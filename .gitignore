@@ -1,0 +1,47 @@
+# Visual Studio / MSBuild
+/.vs/
+*.user
+*.opensdf
+*.sdf
+*.cachefile
+*.VC.db
+*.ipch
+*.suo
+
+# Build outputs
+/Release/
+/Debug/
+/x64/
+/Win32/
+/build/
+/dist/
+PEAnalyzer/Release/
+PEAnalyzer/Debug/
+test_build/**/Release/
+test_build/**/Debug/
+
+# CMake artifacts
+/CMakeFiles/
+/CMakeCache.txt
+/cmake-build*/
+
+# Intermediate objects
+*.obj
+*.pch
+*.pdb
+*.idb
+*.iobj
+*.ipdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+
+# Logs / temp
+*.log
+*.tmp
+artifacts/
+
+# Trae IDE
+/.trae/

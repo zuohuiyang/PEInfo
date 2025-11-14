@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360">
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f8f9fb"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="480" height="360" fill="#f4f6f8"/>
+  <text x="16" y="24" font-family="Segoe UI" font-size="14" fill="#333">File Format Identifier</text>
+  <!-- 工具栏 -->
+  <rect x="16" y="36" width="448" height="36" rx="8" fill="url(#card)" stroke="#d0d6dc"/>
+  <text x="28" y="58" font-family="Segoe UI" font-size="12" fill="#555">Path</text>
+  <rect x="70" y="44" width="300" height="20" rx="4" fill="#fff" stroke="#c7cdd3"/>
+  <rect x="380" y="44" width="68" height="20" rx="4" fill="#e9eef3" stroke="#c7cdd3"/>
+  <text x="402" y="58" font-family="Segoe UI" font-size="12" fill="#333">...</text>
+  <!-- 左侧导航：Imports 选中 -->
+  <rect x="16" y="84" width="140" height="260" rx="8" fill="url(#card)" stroke="#d0d6dc"/>
+  <rect x="24" y="96" width="124" height="28" rx="6" fill="#ffffff" stroke="#c7cdd3"/>
+  <text x="34" y="114" font-family="Segoe UI" font-size="12" fill="#555">PE Info</text>
+  <rect x="24" y="132" width="124" height="28" rx="6" fill="#e9eef3" stroke="#c7cdd3"/>
+  <rect x="24" y="132" width="3" height="28" fill="#2ca02c"/>
+  <text x="34" y="150" font-family="Segoe UI" font-size="12" fill="#333">Imports</text>
+  <rect x="24" y="168" width="124" height="28" rx="6" fill="#ffffff" stroke="#c7cdd3"/>
+  <text x="34" y="186" font-family="Segoe UI" font-size="12" fill="#555">Hash</text>
+  <!-- 右侧内容：双列表框 + 搜索 -->
+  <rect x="164" y="84" width="300" height="260" rx="10" fill="url(#card)" stroke="#d0d6dc"/>
+  <text x="176" y="104" font-family="Segoe UI" font-size="12" fill="#333">Import Directory (ListBoxes)</text>
+  <!-- 搜索栏 -->
+  <rect x="176" y="114" width="220" height="20" rx="4" fill="#fff" stroke="#c7cdd3"/>
+  <text x="180" y="128" font-family="Segoe UI" font-size="11" fill="#555">Search DLL/API...</text>
+  <rect x="402" y="114" width="50" height="20" rx="4" fill="#e9eef3" stroke="#c7cdd3"/>
+  <text x="416" y="128" font-family="Segoe UI" font-size="11" fill="#333">Find</text>
+  <!-- 左列表框：DLLs -->
+  <text x="176" y="140" font-family="Segoe UI" font-size="11" fill="#555">DLLs</text>
+  <rect x="176" y="148" width="136" height="172" rx="6" fill="#fff" stroke="#c7cdd3"/>
+  <text x="182" y="164" font-family="Segoe UI" font-size="12" fill="#333">KERNEL32.dll</text>
+  <text x="182" y="180" font-family="Segoe UI" font-size="12" fill="#333">USER32.dll</text>
+  <text x="182" y="196" font-family="Segoe UI" font-size="12" fill="#333">GDI32.dll</text>
+  <text x="182" y="212" font-family="Segoe UI" font-size="12" fill="#333">COMDLG32.dll</text>
+  <!-- 右列表框：APIs -->
+  <text x="318" y="140" font-family="Segoe UI" font-size="11" fill="#555">APIs</text>
+  <rect x="318" y="148" width="136" height="172" rx="6" fill="#fff" stroke="#c7cdd3"/>
+  <text x="324" y="164" font-family="Segoe UI" font-size="12" fill="#333">CreateFileW</text>
+  <text x="324" y="180" font-family="Segoe UI" font-size="12" fill="#333">ReadFile</text>
+  <text x="324" y="196" font-family="Segoe UI" font-size="12" fill="#333">CloseHandle</text>
+  <text x="324" y="212" font-family="Segoe UI" font-size="12" fill="#333">MessageBoxW</text>
+</svg>

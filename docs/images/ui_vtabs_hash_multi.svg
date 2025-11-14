@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360">
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f8f9fb"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="480" height="360" fill="#f4f6f8"/>
+  <text x="16" y="24" font-family="Segoe UI" font-size="14" fill="#333">File Format Identifier</text>
+  <!-- 工具栏 -->
+  <rect x="16" y="36" width="448" height="36" rx="8" fill="url(#card)" stroke="#d0d6dc"/>
+  <text x="28" y="58" font-family="Segoe UI" font-size="12" fill="#555">Path</text>
+  <rect x="70" y="44" width="300" height="20" rx="4" fill="#fff" stroke="#c7cdd3"/>
+  <rect x="380" y="44" width="68" height="20" rx="4" fill="#e9eef3" stroke="#c7cdd3"/>
+  <text x="402" y="58" font-family="Segoe UI" font-size="12" fill="#333">...</text>
+  <!-- 左侧导航：Hash 选中 -->
+  <rect x="16" y="84" width="140" height="260" rx="8" fill="url(#card)" stroke="#d0d6dc"/>
+  <rect x="24" y="96" width="124" height="28" rx="6" fill="#ffffff" stroke="#c7cdd3"/>
+  <text x="34" y="114" font-family="Segoe UI" font-size="12" fill="#555">PE Info</text>
+  <rect x="24" y="132" width="124" height="28" rx="6" fill="#ffffff" stroke="#c7cdd3"/>
+  <text x="34" y="150" font-family="Segoe UI" font-size="12" fill="#555">Imports</text>
+  <rect x="24" y="168" width="124" height="28" rx="6" fill="#e9eef3" stroke="#c7cdd3"/>
+  <rect x="24" y="168" width="3" height="28" fill="#2ca02c"/>
+  <text x="34" y="186" font-family="Segoe UI" font-size="12" fill="#333">Hash</text>
+  <!-- 右侧内容：多算法勾选 + 结果 -->
+  <rect x="164" y="84" width="300" height="260" rx="10" fill="url(#card)" stroke="#d0d6dc"/>
+  <text x="176" y="104" font-family="Segoe UI" font-size="12" fill="#333">Hash Algorithms</text>
+  <!-- 算法勾选列（示意） -->
+  <text x="176" y="126" font-family="Segoe UI" font-size="12" fill="#333">☑ MD5</text>
+  <rect x="236" y="116" width="208" height="18" rx="4" fill="#fff" stroke="#c7cdd3"/>
+  <text x="176" y="146" font-family="Segoe UI" font-size="12" fill="#333">☑ SHA1</text>
+  <rect x="236" y="136" width="208" height="18" rx="4" fill="#fff" stroke="#c7cdd3"/>
+  <text x="176" y="166" font-family="Segoe UI" font-size="12" fill="#333">☑ CRC32</text>
+  <rect x="236" y="156" width="208" height="18" rx="4" fill="#fff" stroke="#c7cdd3"/>
+  <text x="176" y="186" font-family="Segoe UI" font-size="12" fill="#333">□ SHA256</text>
+  <rect x="236" y="176" width="208" height="18" rx="4" fill="#fff" stroke="#c7cdd3"/>
+  <text x="176" y="206" font-family="Segoe UI" font-size="12" fill="#333">□ SHA384</text>
+  <rect x="236" y="196" width="208" height="18" rx="4" fill="#fff" stroke="#c7cdd3"/>
+  <text x="176" y="226" font-family="Segoe UI" font-size="12" fill="#333">□ SHA512</text>
+  <rect x="236" y="216" width="208" height="18" rx="4" fill="#fff" stroke="#c7cdd3"/>
+  <text x="176" y="246" font-family="Segoe UI" font-size="12" fill="#333">□ RIPEMD160</text>
+  <rect x="236" y="236" width="208" height="18" rx="4" fill="#fff" stroke="#c7cdd3"/>
+  <!-- 操作与结果 -->
+  <rect x="176" y="260" width="88" height="24" rx="4" fill="#e9eef3" stroke="#c7cdd3"/>
+  <text x="196" y="277" font-family="Segoe UI" font-size="12" fill="#333">Calculate</text>
+  <rect x="276" y="252" width="168" height="80" rx="6" fill="#fff" stroke="#c7cdd3"/>
+  <text x="284" y="268" font-family="Segoe UI" font-size="11" fill="#555">MD5: 14D06B8C...A90A9</text>
+  <text x="284" y="284" font-family="Segoe UI" font-size="11" fill="#555">SHA1: 0A0A9F2A...F65E01</text>
+  <text x="284" y="300" font-family="Segoe UI" font-size="11" fill="#555">CRC32: 414FA339</text>
+</svg>
