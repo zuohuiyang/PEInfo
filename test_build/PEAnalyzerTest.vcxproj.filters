@@ -7,7 +7,16 @@
     <ClCompile Include="C:\project\petools\test_simple.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\project\petools\CliOptions.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\project\petools\PEParser.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\project\petools\PEDebugInfo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\project\petools\PESignature.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="C:\project\petools\HashCalculator.cpp">
@@ -21,7 +30,16 @@
     <ClInclude Include="C:\project\petools\targetver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="C:\project\petools\CliOptions.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="C:\project\petools\PEParser.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\project\petools\PEDebugInfo.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\project\petools\PESignature.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="C:\project\petools\HashCalculator.h">

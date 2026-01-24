@@ -1,3 +1,0 @@
-C:/project/petools/test_build/CMakeFiles/PEAnalyzerTest.dir
-C:/project/petools/test_build/CMakeFiles/ALL_BUILD.dir
-C:/project/petools/test_build/CMakeFiles/ZERO_CHECK.dir

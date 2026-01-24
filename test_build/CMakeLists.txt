@@ -5,25 +5,21 @@ project(PEAnalyzerTest VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 设置32位编译
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(STATUS "64-bit compiler detected, forcing 32-bit compilation")
-    set(CMAKE_GENERATOR_PLATFORM Win32)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /arch:IA32")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:IA32")
-endif()
-
 # 设置编译选项
 if(MSVC)
     add_compile_options(/W3 /EHsc)
-    add_compile_options(/MT /O2)
+    add_compile_options($<$<CONFIG:Release>:/O2>)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 # 定义测试源文件
 set(TEST_SOURCE_FILES
     ../stdafx.cpp
     ../test_simple.cpp
+    ../CliOptions.cpp
     ../PEParser.cpp
+    ../PEDebugInfo.cpp
+    ../PESignature.cpp
     ../HashCalculator.cpp
 )
 
@@ -31,7 +27,10 @@ set(TEST_SOURCE_FILES
 set(HEADER_FILES
     ../stdafx.h
     ../targetver.h
+    ../CliOptions.h
     ../PEParser.h
+    ../PEDebugInfo.h
+    ../PESignature.h
     ../HashCalculator.h
 )
 
@@ -47,6 +46,8 @@ target_link_libraries(PEAnalyzerTest
         comctl32
         shell32
         advapi32
+        wintrust
+        crypt32
 )
 
 # 设置子系统

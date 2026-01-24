@@ -86,7 +86,7 @@
   - 系统库：`kernel32/user32/gdi32/comctl32/shell32/advapi32/ole32/comdlg32/crypt32`。
   - 不使用 Qt/wxWidgets/MFC 等第三方 GUI 框架。
 - 资源编译
-  - `*.rc` 资源包含菜单与图标，确保 `resource.h` ID 与 `PEAnalyzer.rc` 一致。
+  - `*.rc` 资源包含菜单与图标，确保 `resource.h` ID 与资源文件一致。
 - 编码与国际化
   - 源文件统一保存为 UTF-8；界面文案中文；避免代码页警告。
 

@@ -15,10 +15,14 @@
 /Win32/
 /build/
 /dist/
-PEAnalyzer/Release/
-PEAnalyzer/Debug/
+PEAnalyzer/
+PEInfo/
 test_build/**/Release/
 test_build/**/Debug/
+test_build/CMakeFiles/
+test_build/CMakeCache.txt
+test_build/cmake_install.cmake
+test_build/Testing/
 
 # CMake artifacts
 /CMakeFiles/
@@ -41,6 +45,10 @@ test_build/**/Debug/
 # Logs / temp
 *.log
 *.tmp
+*.tlog
+*.lastbuildstate
+*.recipe
+*.res
 artifacts/
 
 # Trae IDE

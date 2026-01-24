@@ -150,7 +150,7 @@ bool InitializeApplication(HINSTANCE hInstance) {
     wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wcex.lpszMenuName = nullptr;
-    wcex.lpszClassName = TEXT("PEAnalyzerWindowClass");
+    wcex.lpszClassName = TEXT("PEInfoWindowClass");
     wcex.hIconSm = LoadIcon(nullptr, IDI_APPLICATION);
 
     if (!RegisterClassEx(&wcex)) {
@@ -170,7 +170,7 @@ void ShowMainWindow() {
     // Create main window
     g_hMainWindow = CreateWindowExW(
         0,
-        L"PEAnalyzerWindowClass",
+        L"PEInfoWindowClass",
         L"File Format Identifier",
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT,

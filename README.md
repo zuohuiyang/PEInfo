@@ -1,8 +1,8 @@
-# PE Analyzer & Hash Calculator
+# PEInfo
 
 ## 项目概述
 
-PE Analyzer & Hash Calculator 是一个专业的32位C++ GUI应用程序，专为Windows系统设计，提供PE文件分析和哈希计算功能。项目采用模块化架构，使用Win32 API构建用户界面，完全符合C++17标准。
+PEInfo 是一个 Windows C++ 工具，提供 PE 文件信息查看（含导入/导出/延迟加载、PDB 信息、时间戳可读化、数字签名检测/验证）与文件哈希计算能力。项目采用模块化架构，核心解析与哈希逻辑可复用，符合 C++17 标准。
 
 ## 🎯 核心功能
 
@@ -11,6 +11,9 @@ PE Analyzer & Hash Calculator 是一个专业的32位C++ GUI应用程序，专�
 - ✅ **PE结构解析**：完整解析DOS头、PE头、导入表
 - ✅ **树形显示**：使用树形控件清晰展示PE结构
 - ✅ **详细信息**：显示DLL名称、函数名、序号、RVA
+- ✅ **PDB 信息**：解析 Debug Directory（RSDS GUID + Age + PDB Path）
+- ✅ **时间戳可读化**：TimeDateStamp 支持 raw/utc/local 三种展示
+- ✅ **数字签名**：可识别并验证嵌入式签名/编录(Catalog)签名，打印签名者与指纹等信息
 - ✅ **Unicode支持**：支持Unicode文件路径
 
 ### 2. 哈希计算器  
@@ -31,35 +34,58 @@ PE Analyzer & Hash Calculator 是一个专业的32位C++ GUI应用程序，专�
 
 ### 项目结构
 ```
-PEAnalyzer/
-├── PEAnalyzer.sln          # Visual Studio解决方案
+petools/
+├── PEInfo.sln              # Visual Studio解决方案
 ├── PEAnalyzer.vcxproj      # 项目文件（已配置C++17, Win32, /MT）
+├── CliMain.cpp             # 命令行入口
+├── CliOptions.h/cpp        # 命令行参数解析（可测试）
 ├── PEParser.h/cpp          # PE文件解析模块
+├── PEDebugInfo.h/cpp       # Debug Directory / PDB 解析
+├── PESignature.h/cpp       # 数字签名检测/验证（embedded/catalog）
 ├── HashCalculator.h/cpp    # 哈希计算模块  
 ├── PEAnalyzer.h/cpp        # 主GUI应用程序
 ├── stdafx.h/cpp            # 预编译头文件
 ├── PEAnalyzer.rc           # 资源文件
 ├── build.bat               # 编译脚本
-└── test_core.cpp           # 核心功能测试程序
+└── test_simple.cpp         # 核心功能测试程序（由 test_build 工程构建运行）
 ```
 
 ## 📦 编译说明
 
 ### 方法1：Visual Studio IDE
-1. 打开 `PEAnalyzer.sln` 文件
+1. 打开 `PEInfo.sln` 文件
 2. 选择 `Release` 配置和 `x86` 平台  
 3. 点击 `生成` -> `生成解决方案`
 
 ### 方法2：命令行编译
 1. 打开 "Visual Studio 开发人员命令提示符"
 2. 导航到项目目录
-3. 运行：`msbuild PEAnalyzer.sln /p:Configuration=Release /p:Platform=Win32`
+3. 运行：`msbuild PEInfo.sln /p:Configuration=Release /p:Platform=Win32`
 
 ### 方法3：使用编译脚本
 1. 打开 "Visual Studio 开发人员命令提示符"
 2. 运行：`build.bat`
 
-⚠️ **注意**：当前环境中没有安装Visual Studio，无法直接编译测试。请按照上述方法在有Visual Studio的环境中编译。
+⚠️ **注意**：需要安装 Visual Studio 2022（MSVC v143）与 Windows 10/11 SDK。
+
+## 🧰 命令行用法（CLI）
+
+### 常用示例
+- 概要信息（默认含概要）：
+  - `PEInfo.exe C:\Windows\System32\notepad.exe`
+- 指定时间戳展示：
+  - `PEInfo.exe a.exe --summary --time utc`
+- 输出 PDB（如存在）：
+  - `PEInfo.exe a.exe --pdb`
+- 输出并验证签名（自动选择 embedded/cat）：
+  - `PEInfo.exe a.sys --sig --verify --sig-source auto`
+- 生成 JSON 报告并写文件：
+  - `PEInfo.exe a.exe --all --format json --out report.json`
+
+### 退出码（与 --verify 相关）
+- `0`：成功（解析成功；若指定 `--verify` 则验证也成功）
+- `3`：签名验证失败
+- `4`：未签名
 
 ## 🧪 测试验证
 

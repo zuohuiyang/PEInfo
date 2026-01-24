@@ -1,8 +1,8 @@
 @echo off
-setlocal ENABLEDELAYEDEXECUTION
+setlocal ENABLEDELAYEDEXPANSION
 
 set VSENV="C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars32.bat"
-set SOLUTION=PEAnalyzer.sln
+set SOLUTION=PEInfo.sln
 
 set PLATFORM=%1
 if "%PLATFORM%"=="" set PLATFORM=Win32
@@ -36,18 +36,18 @@ set OUTDIR=%CONFIG%
 if /I "%PLATFORM%"=="x64" set OUTDIR=x64\%CONFIG%
 if /I "%PLATFORM%"=="Win32" set OUTDIR=%CONFIG%
 
-set EXE_PATH=%CD%\%OUTDIR%\PEAnalyzer.exe
-set PDB_PATH=%CD%\%OUTDIR%\vc143.pdb
+set EXE_PATH=%CD%\%OUTDIR%\PEInfo.exe
+set PDB_PATH=%CD%\%OUTDIR%\PEInfo.pdb
 
-echo 打包构建产物到 dist\PEAnalyzer_%PLATFORM%_%CONFIG%.zip
+echo 打包构建产物到 dist\PEInfo_%PLATFORM%_%CONFIG%.zip
 if not exist dist mkdir dist
 if not exist dist\%PLATFORM% mkdir dist\%PLATFORM%
 if not exist dist\%PLATFORM%\%CONFIG% mkdir dist\%PLATFORM%\%CONFIG%
 
-copy /Y "%EXE_PATH" "dist\%PLATFORM%\%CONFIG%\PEAnalyzer.exe" >nul
+copy /Y "%EXE_PATH" "dist\%PLATFORM%\%CONFIG%\PEInfo.exe" >nul
 if exist "%PDB_PATH" copy /Y "%PDB_PATH" "dist\%PLATFORM%\%CONFIG%\vc143.pdb" >nul
 
-powershell -NoProfile -Command "Compress-Archive -Path 'dist\\%PLATFORM%\\%CONFIG%\\*' -DestinationPath 'dist\\PEAnalyzer_%PLATFORM%_%CONFIG%.zip' -Force" >nul
+tar -a -c -f "dist\PEInfo_%PLATFORM%_%CONFIG%.zip" -C "dist\%PLATFORM%\%CONFIG%" . >nul
 if %errorlevel% neq 0 (
     echo 打包失败
     exit /b 1

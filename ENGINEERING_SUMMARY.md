@@ -7,8 +7,8 @@
 - Windows SDK：10.x（已在 VS 工作负载中安装）
 
 ## 项目结构与目标
-- 解决方案：`PEAnalyzer.sln`
-- 主程序：`PEAnalyzer.exe`（Win32/x86，支持 x64 构建）
+- 解决方案：`PEInfo.sln`
+- 主程序：`PEInfo.exe`（Win32/x86，支持 x64 构建）
 - 测试工程：`test_build\PEAnalyzerTest.vcxproj`（控制台测试）
 - 资源与设计图：`docs/images/`（已保留当前方案图：`ui_vtabs_*`）
 
@@ -16,10 +16,10 @@
 - 构建脚本：`build.bat`
   - 32位发布版：`./build.bat Win32 Release`
   - 64位发布版：`./build.bat x64 Release`
-- 打包产物：`dist\PEAnalyzer_x86_Release.zip`、`dist\PEAnalyzer_x64_Release.zip`
+- 打包产物：`dist\PEInfo_x86_Release.zip`、`dist\PEInfo_x64_Release.zip`
 
 ## 运行与验证
-- 启动应用：`./Release/PEAnalyzer.exe`
+- 启动应用：`./Release/PEInfo.exe`
 - 测试执行：`./test_build/Release/PEAnalyzerTest.exe`
   - 覆盖：PE 解析基础、文本与文件哈希、导入解析健壮性
 - 截图采集（用于界面确认）：
