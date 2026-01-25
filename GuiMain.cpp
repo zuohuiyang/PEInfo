@@ -4,6 +4,7 @@
 #include "ReportJsonWriter.h"
 #include "ReportTextWriter.h"
 #include "ReportUtil.h"
+#include "ShellContextMenu.h"
 
 #include <commctrl.h>
 #include <commdlg.h>
@@ -26,6 +27,7 @@ enum : UINT {
     IDC_BTN_EXPORT_JSON = 1003,
     IDC_BTN_EXPORT_TEXT = 1004,
     IDC_BTN_COPY_SUMMARY = 1005,
+    IDC_BTN_SETTINGS = 1006,
     IDC_TAB = 1010,
     IDC_FILEINFO = 1020,
     IDC_SUMMARY = 2001,
@@ -68,6 +70,7 @@ struct GuiState {
     HWND btnExportJson = nullptr;
     HWND btnExportText = nullptr;
     HWND btnCopySummary = nullptr;
+    HWND btnSettings = nullptr;
     HWND fileInfo = nullptr;
     HWND tab = nullptr;
 
@@ -82,6 +85,7 @@ struct GuiState {
 
     bool busy = false;
     std::wstring currentFile;
+    std::wstring pendingFile;
     std::unique_ptr<PEAnalysisResult> analysis;
 };
 
@@ -304,7 +308,170 @@ static void SetBusy(GuiState* s, bool busy) {
     EnableWindow(s->btnExportJson, !busy && s->analysis != nullptr);
     EnableWindow(s->btnExportText, !busy && s->analysis != nullptr);
     EnableWindow(s->btnCopySummary, !busy && s->analysis != nullptr);
+    EnableWindow(s->btnSettings, !busy);
     EnableWindow(s->btnSigVerify, !busy && s->analysis != nullptr && s->analysis->signaturePresenceReady);
+}
+
+static std::wstring GetSelfExePath() {
+    wchar_t buf[MAX_PATH] = {};
+    DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) {
+        return {};
+    }
+    return buf;
+}
+
+enum : UINT {
+    IDC_SETTINGS_CONTEXT_MENU = 5001,
+    IDC_SETTINGS_INFO = 5002
+};
+
+struct SettingsDialogState {
+    HWND hwnd = nullptr;
+    HWND chkContextMenu = nullptr;
+    HWND info = nullptr;
+    HWND btnOk = nullptr;
+    HWND btnCancel = nullptr;
+    bool installedBefore = false;
+};
+
+static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    SettingsDialogState* s = reinterpret_cast<SettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+    if (msg == WM_NCCREATE) {
+        auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    if (!s) {
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    switch (msg) {
+        case WM_CREATE: {
+            s->chkContextMenu = CreateWindowW(L"BUTTON",
+                                              L"\u5728\u8d44\u6e90\u7ba1\u7406\u5668\u53f3\u952e\u83dc\u5355\u4e2d\u6dfb\u52a0\u201c\u7528 PEInfo \u6253\u5f00\u201d",
+                                              WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                                              12, 16, 520, 24,
+                                              hwnd,
+                                              reinterpret_cast<HMENU>(IDC_SETTINGS_CONTEXT_MENU),
+                                              nullptr,
+                                              nullptr);
+            s->info = CreateWindowW(L"STATIC",
+                                    L"Windows 11 \u4e0b\u53ef\u80fd\u5728\u201c\u663e\u793a\u66f4\u591a\u9009\u9879\u201d\u91cc\u51fa\u73b0",
+                                    WS_CHILD | WS_VISIBLE | SS_LEFT,
+                                    12, 46, 520, 24,
+                                    hwnd,
+                                    reinterpret_cast<HMENU>(IDC_SETTINGS_INFO),
+                                    nullptr,
+                                    nullptr);
+
+            s->btnOk = CreateWindowW(L"BUTTON", L"\u786e\u5b9a", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                                     360, 86, 84, 28, hwnd, reinterpret_cast<HMENU>(IDOK), nullptr, nullptr);
+            s->btnCancel = CreateWindowW(L"BUTTON", L"\u53d6\u6d88", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                         454, 86, 84, 28, hwnd, reinterpret_cast<HMENU>(IDCANCEL), nullptr, nullptr);
+
+            if (s->installedBefore) {
+                SendMessageW(s->chkContextMenu, BM_SETCHECK, BST_CHECKED, 0);
+            }
+            return 0;
+        }
+        case WM_COMMAND: {
+            switch (LOWORD(wParam)) {
+                case IDOK: {
+                    bool enable = (SendMessageW(s->chkContextMenu, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                    std::wstring err;
+                    if (enable && !s->installedBefore) {
+                        std::wstring guiPath = GetSelfExePath();
+                        if (guiPath.empty()) {
+                            MessageBoxError(hwnd, L"\u83b7\u53d6\u7a0b\u5e8f\u8def\u5f84\u5931\u8d25");
+                            return 0;
+                        }
+                        if (!InstallPeInfoShellContextMenuForCurrentUser(guiPath, err)) {
+                            MessageBoxError(hwnd, err.empty() ? L"\u5b89\u88c5\u53f3\u952e\u83dc\u5355\u5931\u8d25" : err);
+                            return 0;
+                        }
+                        MessageBoxW(hwnd, L"\u5df2\u5b89\u88c5\u53f3\u952e\u83dc\u5355", L"\u8bbe\u7f6e", MB_OK | MB_ICONINFORMATION);
+                    }
+                    if (!enable && s->installedBefore) {
+                        if (!UninstallPeInfoShellContextMenuForCurrentUser(err)) {
+                            MessageBoxError(hwnd, err.empty() ? L"\u5378\u8f7d\u53f3\u952e\u83dc\u5355\u5931\u8d25" : err);
+                            return 0;
+                        }
+                        MessageBoxW(hwnd, L"\u5df2\u5378\u8f7d\u53f3\u952e\u83dc\u5355", L"\u8bbe\u7f6e", MB_OK | MB_ICONINFORMATION);
+                    }
+                    DestroyWindow(hwnd);
+                    return 0;
+                }
+                case IDCANCEL: {
+                    DestroyWindow(hwnd);
+                    return 0;
+                }
+            }
+            break;
+        }
+        case WM_CLOSE: {
+            DestroyWindow(hwnd);
+            return 0;
+        }
+    }
+
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+static void ShowSettingsDialog(HWND owner) {
+    static const wchar_t* kSettingsClassName = L"PEInfoGuiSettingsWindow";
+    static bool classRegistered = false;
+    if (!classRegistered) {
+        WNDCLASSEXW wc = {};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = SettingsWndProc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = kSettingsClassName;
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+        RegisterClassExW(&wc);
+        classRegistered = true;
+    }
+
+    SettingsDialogState state;
+    state.installedBefore = IsPeInfoShellContextMenuInstalled();
+
+    RECT ownerRc = {};
+    GetWindowRect(owner, &ownerRc);
+    int w = 560;
+    int h = 156;
+    int x = ownerRc.left + ((ownerRc.right - ownerRc.left) - w) / 2;
+    int y = ownerRc.top + ((ownerRc.bottom - ownerRc.top) - h) / 2;
+
+    EnableWindow(owner, FALSE);
+    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME,
+                               kSettingsClassName,
+                               L"\u8bbe\u7f6e",
+                               WS_CAPTION | WS_SYSMENU,
+                               x, y, w, h,
+                               owner,
+                               nullptr,
+                               GetModuleHandleW(nullptr),
+                               &state);
+    if (!dlg) {
+        EnableWindow(owner, TRUE);
+        return;
+    }
+    state.hwnd = dlg;
+    ShowWindow(dlg, SW_SHOW);
+    UpdateWindow(dlg);
+
+    MSG msg = {};
+    while (IsWindow(dlg) && GetMessageW(&msg, nullptr, 0, 0)) {
+        if (!IsDialogMessageW(dlg, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    EnableWindow(owner, TRUE);
+    SetForegroundWindow(owner);
 }
 
 static RECT GetTabPageRect(HWND hwndMain, HWND hwndTab) {
@@ -576,6 +743,8 @@ static void UpdateLayout(GuiState* s) {
     MoveWindow(s->btnExportText, x, row1Y, btnW + 16, btnH, TRUE);
     x += btnW + 16 + pad;
     MoveWindow(s->btnCopySummary, x, row1Y, btnW + 16, btnH, TRUE);
+    x += btnW + 16 + pad;
+    MoveWindow(s->btnSettings, x, row1Y, btnW, btnH, TRUE);
 
     int fileInfoY = row1Y + btnH + pad;
     int fileInfoH = 40;
@@ -618,12 +787,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     switch (msg) {
         case WM_CREATE: {
             DragAcceptFiles(hwnd, TRUE);
+            s->hwnd = hwnd;
 
             s->btnOpen = CreateWindowW(L"BUTTON", L"\u6253\u5f00", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_OPEN), nullptr, nullptr);
             s->btnRefresh = CreateWindowW(L"BUTTON", L"\u5237\u65b0", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_REFRESH), nullptr, nullptr);
             s->btnExportJson = CreateWindowW(L"BUTTON", L"\u5bfc\u51fa JSON", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_EXPORT_JSON), nullptr, nullptr);
             s->btnExportText = CreateWindowW(L"BUTTON", L"\u5bfc\u51fa Text", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_EXPORT_TEXT), nullptr, nullptr);
             s->btnCopySummary = CreateWindowW(L"BUTTON", L"\u590d\u5236\u6458\u8981", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_COPY_SUMMARY), nullptr, nullptr);
+            s->btnSettings = CreateWindowW(L"BUTTON", L"\u8bbe\u7f6e", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_SETTINGS), nullptr, nullptr);
 
             s->fileInfo = CreateWindowW(L"STATIC", L"\u672a\u6253\u5f00\u6587\u4ef6", WS_CHILD | WS_VISIBLE | SS_LEFT, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_FILEINFO), nullptr, nullptr);
 
@@ -682,6 +853,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             SetBusy(s, false);
             RefreshAllViews(s);
             UpdateLayout(s);
+            if (!s->pendingFile.empty()) {
+                std::wstring path = s->pendingFile;
+                s->pendingFile.clear();
+                StartAnalysis(s, path);
+            }
             return 0;
         }
         case WM_SIZE: {
@@ -713,6 +889,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 }
                 case IDC_BTN_COPY_SUMMARY: {
                     CopySummary(s);
+                    return 0;
+                }
+                case IDC_BTN_SETTINGS: {
+                    ShowSettingsDialog(hwnd);
                     return 0;
                 }
                 case IDC_SIG_VERIFY: {
@@ -873,6 +1053,22 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     InitCommonControlsEx(&icc);
 
     GuiState state;
+    {
+        int argc = 0;
+        LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        if (argv != nullptr && argc >= 2) {
+            std::wstring arg1 = argv[1];
+            if (!arg1.empty() && arg1.rfind(L"--", 0) != 0) {
+                DWORD attr = GetFileAttributesW(arg1.c_str());
+                if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+                    state.pendingFile = arg1;
+                }
+            }
+        }
+        if (argv != nullptr) {
+            LocalFree(argv);
+        }
+    }
 
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
