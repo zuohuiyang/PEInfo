@@ -53,7 +53,10 @@ artifacts/
 
 # Local verification artifacts
 /_cli.*
-/_gui.*
+/_gui*
+
+# MSBuild intermediate output directories
+/PEInfoGui/
 
 # Trae IDE
 /.trae/

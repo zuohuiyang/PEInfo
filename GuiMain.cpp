@@ -47,8 +47,7 @@ enum : UINT {
     IDC_SIGNATURE = 2006,
     IDC_HASH = 2007,
     IDC_IMPORTS_FILTER = 2101,
-    IDC_IMPORTS_CLEAR = 2102,
-    IDC_SIG_VERIFY = 3001
+    IDC_IMPORTS_CLEAR = 2102
 };
 
 enum class TabIndex : int {
@@ -62,6 +61,7 @@ enum class TabIndex : int {
 };
 
 struct VerifyResultMessage {
+    std::wstring filePath;
     std::optional<PESignatureVerifyResult> embedded;
     std::optional<PESignatureVerifyResult> catalog;
     bool ok = true;
@@ -92,14 +92,15 @@ struct GuiState {
     HWND pagePdb = nullptr;
     HWND pageSignature = nullptr;
     HWND pageHash = nullptr;
-    HWND btnSigVerify = nullptr;
     HWND importsFilterLabel = nullptr;
     HWND importsFilterEdit = nullptr;
     HWND importsClearBtn = nullptr;
 
     bool busy = false;
+    bool verifyInFlight = false;
     std::wstring currentFile;
     std::wstring pendingFile;
+    std::wstring verifyInFlightFile;
     std::unique_ptr<PEAnalysisResult> analysis;
 
     HFONT uiFont = nullptr;
@@ -351,7 +352,7 @@ static void AppendSigner(std::wostringstream& out, const PESignerInfo& si) {
     if (!si.timestamp.empty()) out << L"Timestamp: " << si.timestamp << L"\r\n";
 }
 
-static void PopulateSignature(HWND edit, const PEAnalysisResult& ar) {
+static void PopulateSignature(HWND edit, const PEAnalysisResult& ar, bool verifying) {
     std::wostringstream out;
     if (ar.signaturePresenceReady) {
         out << L"Presence: " << SigPresenceToText(ar.signaturePresence) << L"\r\n";
@@ -373,9 +374,13 @@ static void PopulateSignature(HWND edit, const PEAnalysisResult& ar) {
         AppendSigner(out, ar.catalogVerify->signer);
     }
     if (!ar.embeddedVerify.has_value() && !ar.catalogVerify.has_value()) {
-        out << L"\r\n\u9a8c\u8bc1\uff1a\u672a\u6267\u884c\r\n";
+        out << L"\r\n\u9a8c\u8bc1\uff1a" << (verifying ? L"\u8fdb\u884c\u4e2d..." : L"\u672a\u6267\u884c") << L"\r\n";
     }
     SetWindowTextWString(edit, out.str());
+}
+
+static bool IsVerifyInFlightForCurrent(const GuiState* s) {
+    return s->verifyInFlight && !s->verifyInFlightFile.empty() && s->verifyInFlightFile == s->currentFile;
 }
 
 static void PopulateHash(HWND edit, const std::vector<HashResult>& hashes) {
@@ -403,7 +408,6 @@ static void SetBusy(GuiState* s, bool busy) {
     EnableWindow(s->btnExportText, !busy && s->analysis != nullptr);
     EnableWindow(s->btnCopySummary, !busy && s->analysis != nullptr);
     EnableWindow(s->btnSettings, !busy);
-    EnableWindow(s->btnSigVerify, !busy && s->analysis != nullptr && s->analysis->signaturePresenceReady);
 }
 
 static std::wstring GetSelfExePath() {
@@ -616,7 +620,6 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
     for (int i = 0; i < static_cast<int>(std::size(pages)); ++i) {
         ShowWindow(pages[i], (i == static_cast<int>(idx)) ? SW_SHOW : SW_HIDE);
     }
-    ShowWindow(s->btnSigVerify, (idx == TabIndex::Signature) ? SW_SHOW : SW_HIDE);
     bool showImportsFilter = (idx == TabIndex::Imports);
     ShowWindow(s->importsFilterLabel, showImportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->importsFilterEdit, showImportsFilter ? SW_SHOW : SW_HIDE);
@@ -656,7 +659,7 @@ static void RefreshAllViews(GuiState* s) {
     ApplyImportsFilterNow(s);
     PopulateExports(s->pageExports, s->analysis->parser);
     PopulatePdb(s->pagePdb, s->analysis->pdb);
-    PopulateSignature(s->pageSignature, *s->analysis);
+    PopulateSignature(s->pageSignature, *s->analysis, IsVerifyInFlightForCurrent(s));
     PopulateHash(s->pageHash, s->analysis->hashes);
     UpdateFileInfo(s);
 }
@@ -698,6 +701,7 @@ static unsigned __stdcall VerifyThreadProc(void* param) {
     delete msg;
 
     auto* vr = new VerifyResultMessage();
+    vr->filePath = filePath;
     try {
         vr->embedded = VerifyEmbeddedSignature(filePath);
         vr->catalog = VerifyCatalogSignature(filePath);
@@ -711,8 +715,53 @@ static unsigned __stdcall VerifyThreadProc(void* param) {
     return 0;
 }
 
+static bool HasAnyVerifyResult(const PEAnalysisResult& ar) {
+    return ar.embeddedVerify.has_value() || ar.catalogVerify.has_value();
+}
+
+static void StartVerifyIfNeeded(GuiState* s, bool force) {
+    if (s->analysis == nullptr || s->currentFile.empty()) {
+        return;
+    }
+    if (!s->analysis->signaturePresenceReady) {
+        return;
+    }
+    if (!force) {
+        if (HasAnyVerifyResult(*s->analysis)) {
+            return;
+        }
+    }
+    if (s->busy) {
+        return;
+    }
+    if (s->verifyInFlight) {
+        return;
+    }
+
+    s->verifyInFlight = true;
+    s->verifyInFlightFile = s->currentFile;
+    s->analysis->embeddedVerify.reset();
+    s->analysis->catalogVerify.reset();
+    PopulateSignature(s->pageSignature, *s->analysis, IsVerifyInFlightForCurrent(s));
+
+    auto* payload = new std::pair<HWND, std::wstring>(s->hwnd, s->currentFile);
+    uintptr_t th = _beginthreadex(nullptr, 0, VerifyThreadProc, payload, 0, nullptr);
+    if (th == 0) {
+        delete payload;
+        s->verifyInFlight = false;
+        s->verifyInFlightFile.clear();
+        PopulateSignature(s->pageSignature, *s->analysis, IsVerifyInFlightForCurrent(s));
+        MessageBoxError(s->hwnd, L"\u542f\u52a8\u9a8c\u8bc1\u7ebf\u7a0b\u5931\u8d25");
+        return;
+    }
+    CloseHandle(reinterpret_cast<HANDLE>(th));
+}
+
 static void StartAnalysis(GuiState* s, const std::wstring& filePath) {
     if (s->busy) {
+        return;
+    }
+    if (s->verifyInFlight && !s->verifyInFlightFile.empty() && s->verifyInFlightFile == filePath) {
         return;
     }
     s->currentFile = filePath;
@@ -902,10 +951,7 @@ static void UpdateLayout(GuiState* s) {
     MoveWindow(s->pageImports, pageRc.left, pageRc.top + filterH + pad, pageW, pageH - filterH - pad, TRUE);
     MoveWindow(s->pageExports, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pagePdb, pageRc.left, pageRc.top, pageW, pageH, TRUE);
-
-    int sigBtnH = MulDiv(32, static_cast<int>(s->dpi), 96);
-    MoveWindow(s->btnSigVerify, pageRc.left, pageRc.top, MulDiv(140, static_cast<int>(s->dpi), 96), sigBtnH, TRUE);
-    MoveWindow(s->pageSignature, pageRc.left, pageRc.top + sigBtnH + pad, pageW, pageH - sigBtnH - pad, TRUE);
+    MoveWindow(s->pageSignature, pageRc.left, pageRc.top, pageW, pageH, TRUE);
 
     MoveWindow(s->pageHash, pageRc.left, pageRc.top, pageW, pageH, TRUE);
 }
@@ -969,7 +1015,6 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->pagePdb,
         s->pageSignature,
         s->pageHash,
-        s->btnSigVerify,
         s->importsFilterLabel,
         s->importsFilterEdit,
         s->importsClearBtn,
@@ -1060,8 +1105,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->pagePdb = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_PDB), nullptr, nullptr);
             s->pageSignature = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SIGNATURE), nullptr, nullptr);
             s->pageHash = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_HASH), nullptr, nullptr);
-
-            s->btnSigVerify = CreateWindowW(L"BUTTON", L"\u9a8c\u8bc1\u7b7e\u540d", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SIG_VERIFY), nullptr, nullptr);
 
             DWORD listStyle = WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS;
             s->pageSections = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SECTIONS), nullptr, nullptr);
@@ -1157,25 +1200,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     ShowSettingsDialog(hwnd);
                     return 0;
                 }
-                case IDC_SIG_VERIFY: {
-                    if (s->analysis == nullptr || s->currentFile.empty()) {
-                        return 0;
-                    }
-                    if (s->busy) {
-                        return 0;
-                    }
-                    SetBusy(s, true);
-                    auto* payload = new std::pair<HWND, std::wstring>(s->hwnd, s->currentFile);
-                    uintptr_t th = _beginthreadex(nullptr, 0, VerifyThreadProc, payload, 0, nullptr);
-                    if (th == 0) {
-                        delete payload;
-                        SetBusy(s, false);
-                        MessageBoxError(s->hwnd, L"\u542f\u52a8\u9a8c\u8bc1\u7ebf\u7a0b\u5931\u8d25");
-                        return 0;
-                    }
-                    CloseHandle(reinterpret_cast<HANDLE>(th));
-                    return 0;
-                }
                 case IDC_IMPORTS_FILTER: {
                     if (HIWORD(wParam) == EN_CHANGE) {
                         SetTimer(hwnd, kTimerImportsFilter, 200, nullptr);
@@ -1207,6 +1231,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 int idx = TabCtrl_GetCurSel(s->tab);
                 ShowOnlyTab(s, static_cast<TabIndex>(idx));
                 UpdateLayout(s);
+                if (idx == static_cast<int>(TabIndex::Signature)) {
+                    StartVerifyIfNeeded(s, false);
+                }
                 return 0;
             }
             break;
@@ -1238,17 +1265,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
         case WM_APP_VERIFY_DONE: {
             auto* vr = reinterpret_cast<VerifyResultMessage*>(lParam);
+            if (s->verifyInFlight && !s->verifyInFlightFile.empty() && vr->filePath == s->verifyInFlightFile) {
+                s->verifyInFlight = false;
+                s->verifyInFlightFile.clear();
+            }
+            if (!vr->filePath.empty() && vr->filePath != s->currentFile) {
+                delete vr;
+                return 0;
+            }
             if (s->analysis != nullptr) {
                 if (vr->ok) {
                     s->analysis->embeddedVerify = vr->embedded;
                     s->analysis->catalogVerify = vr->catalog;
-                    PopulateSignature(s->pageSignature, *s->analysis);
+                    PopulateSignature(s->pageSignature, *s->analysis, IsVerifyInFlightForCurrent(s));
                 } else {
                     MessageBoxError(s->hwnd, vr->error.empty() ? L"\u9a8c\u8bc1\u5931\u8d25" : vr->error);
                 }
             }
             delete vr;
-            SetBusy(s, false);
             return 0;
         }
         case WM_DESTROY: {
