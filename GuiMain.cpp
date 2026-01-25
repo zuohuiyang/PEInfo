@@ -9,6 +9,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <uxtheme.h>
 #include <process.h>
 
 #include <memory>
@@ -20,6 +21,11 @@ static const wchar_t* kMainClassName = L"PEInfoGuiMainWindow";
 
 static const UINT WM_APP_ANALYSIS_DONE = WM_APP + 1;
 static const UINT WM_APP_VERIFY_DONE = WM_APP + 2;
+
+#ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+DECLARE_HANDLE(DPI_AWARENESS_CONTEXT);
+#define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((DPI_AWARENESS_CONTEXT)-4)
+#endif
 
 enum : UINT {
     IDC_BTN_OPEN = 1001,
@@ -87,7 +93,13 @@ struct GuiState {
     std::wstring currentFile;
     std::wstring pendingFile;
     std::unique_ptr<PEAnalysisResult> analysis;
+
+    HFONT uiFont = nullptr;
+    UINT dpi = 96;
 };
+
+static UINT GetBestWindowDpi(HWND hwnd);
+static HFONT CreateUiFontForDpi(UINT dpi);
 
 static void SetWindowTextWString(HWND hwnd, const std::wstring& s) {
     SetWindowTextW(hwnd, s.c_str());
@@ -333,6 +345,8 @@ struct SettingsDialogState {
     HWND btnOk = nullptr;
     HWND btnCancel = nullptr;
     bool installedBefore = false;
+    HFONT uiFont = nullptr;
+    UINT dpi = 96;
 };
 
 static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -350,10 +364,22 @@ static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
 
     switch (msg) {
         case WM_CREATE: {
+            s->hwnd = hwnd;
+            s->dpi = GetBestWindowDpi(hwnd);
+            s->uiFont = CreateUiFontForDpi(s->dpi);
+
+            int padX = MulDiv(12, static_cast<int>(s->dpi), 96);
+            int padY = MulDiv(16, static_cast<int>(s->dpi), 96);
+            int rowGap = MulDiv(10, static_cast<int>(s->dpi), 96);
+            int chkH = MulDiv(24, static_cast<int>(s->dpi), 96);
+            int infoH = MulDiv(24, static_cast<int>(s->dpi), 96);
+            int btnW = MulDiv(92, static_cast<int>(s->dpi), 96);
+            int btnH = MulDiv(32, static_cast<int>(s->dpi), 96);
+
             s->chkContextMenu = CreateWindowW(L"BUTTON",
                                               L"\u5728\u8d44\u6e90\u7ba1\u7406\u5668\u53f3\u952e\u83dc\u5355\u4e2d\u6dfb\u52a0\u201c\u7528 PEInfo \u6253\u5f00\u201d",
                                               WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                                              12, 16, 520, 24,
+                                              padX, padY, MulDiv(520, static_cast<int>(s->dpi), 96), chkH,
                                               hwnd,
                                               reinterpret_cast<HMENU>(IDC_SETTINGS_CONTEXT_MENU),
                                               nullptr,
@@ -361,19 +387,26 @@ static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
             s->info = CreateWindowW(L"STATIC",
                                     L"Windows 11 \u4e0b\u53ef\u80fd\u5728\u201c\u663e\u793a\u66f4\u591a\u9009\u9879\u201d\u91cc\u51fa\u73b0",
                                     WS_CHILD | WS_VISIBLE | SS_LEFT,
-                                    12, 46, 520, 24,
+                                    padX, padY + chkH + rowGap, MulDiv(520, static_cast<int>(s->dpi), 96), infoH,
                                     hwnd,
                                     reinterpret_cast<HMENU>(IDC_SETTINGS_INFO),
                                     nullptr,
                                     nullptr);
 
-            s->btnOk = CreateWindowW(L"BUTTON", L"\u786e\u5b9a", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-                                     360, 86, 84, 28, hwnd, reinterpret_cast<HMENU>(IDOK), nullptr, nullptr);
+            int btnY = padY + chkH + rowGap + infoH + MulDiv(16, static_cast<int>(s->dpi), 96);
+            int btnRight = MulDiv(536, static_cast<int>(s->dpi), 96);
             s->btnCancel = CreateWindowW(L"BUTTON", L"\u53d6\u6d88", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                         454, 86, 84, 28, hwnd, reinterpret_cast<HMENU>(IDCANCEL), nullptr, nullptr);
+                                         btnRight - btnW, btnY, btnW, btnH, hwnd, reinterpret_cast<HMENU>(IDCANCEL), nullptr, nullptr);
+            s->btnOk = CreateWindowW(L"BUTTON", L"\u786e\u5b9a", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                                     btnRight - (2 * btnW) - MulDiv(10, static_cast<int>(s->dpi), 96), btnY, btnW, btnH, hwnd, reinterpret_cast<HMENU>(IDOK), nullptr, nullptr);
 
             if (s->installedBefore) {
                 SendMessageW(s->chkContextMenu, BM_SETCHECK, BST_CHECKED, 0);
+            }
+
+            HWND controls[] = {s->chkContextMenu, s->info, s->btnOk, s->btnCancel};
+            for (HWND c : controls) {
+                SendMessageW(c, WM_SETFONT, reinterpret_cast<WPARAM>(s->uiFont), TRUE);
             }
             return 0;
         }
@@ -415,6 +448,13 @@ static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
             DestroyWindow(hwnd);
             return 0;
         }
+        case WM_DESTROY: {
+            if (s->uiFont) {
+                DeleteObject(s->uiFont);
+                s->uiFont = nullptr;
+            }
+            break;
+        }
     }
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -440,8 +480,9 @@ static void ShowSettingsDialog(HWND owner) {
 
     RECT ownerRc = {};
     GetWindowRect(owner, &ownerRc);
-    int w = 560;
-    int h = 156;
+    UINT dpi = GetBestWindowDpi(owner);
+    int w = MulDiv(560, static_cast<int>(dpi), 96);
+    int h = MulDiv(170, static_cast<int>(dpi), 96);
     int x = ownerRc.left + ((ownerRc.right - ownerRc.left) - w) / 2;
     int y = ownerRc.top + ((ownerRc.bottom - ownerRc.top) - h) / 2;
 
@@ -728,26 +769,27 @@ static void UpdateLayout(GuiState* s) {
     int w = rc.right - rc.left;
     int h = rc.bottom - rc.top;
 
-    int pad = 8;
-    int btnH = 28;
+    int pad = MulDiv(10, static_cast<int>(s->dpi), 96);
+    int btnH = MulDiv(32, static_cast<int>(s->dpi), 96);
     int row1Y = pad;
     int x = pad;
-    int btnW = 96;
+    int btnW = MulDiv(104, static_cast<int>(s->dpi), 96);
 
     MoveWindow(s->btnOpen, x, row1Y, btnW, btnH, TRUE);
     x += btnW + pad;
     MoveWindow(s->btnRefresh, x, row1Y, btnW, btnH, TRUE);
     x += btnW + pad;
-    MoveWindow(s->btnExportJson, x, row1Y, btnW + 16, btnH, TRUE);
-    x += btnW + 16 + pad;
-    MoveWindow(s->btnExportText, x, row1Y, btnW + 16, btnH, TRUE);
-    x += btnW + 16 + pad;
-    MoveWindow(s->btnCopySummary, x, row1Y, btnW + 16, btnH, TRUE);
-    x += btnW + 16 + pad;
+    int wideBtnW = MulDiv(126, static_cast<int>(s->dpi), 96);
+    MoveWindow(s->btnExportJson, x, row1Y, wideBtnW, btnH, TRUE);
+    x += wideBtnW + pad;
+    MoveWindow(s->btnExportText, x, row1Y, wideBtnW, btnH, TRUE);
+    x += wideBtnW + pad;
+    MoveWindow(s->btnCopySummary, x, row1Y, wideBtnW, btnH, TRUE);
+    x += wideBtnW + pad;
     MoveWindow(s->btnSettings, x, row1Y, btnW, btnH, TRUE);
 
     int fileInfoY = row1Y + btnH + pad;
-    int fileInfoH = 40;
+    int fileInfoH = MulDiv(48, static_cast<int>(s->dpi), 96);
     MoveWindow(s->fileInfo, pad, fileInfoY, w - 2 * pad, fileInfoH, TRUE);
 
     int tabY = fileInfoY + fileInfoH + pad;
@@ -764,11 +806,95 @@ static void UpdateLayout(GuiState* s) {
     MoveWindow(s->pageExports, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pagePdb, pageRc.left, pageRc.top, pageW, pageH, TRUE);
 
-    int sigBtnH = 28;
-    MoveWindow(s->btnSigVerify, pageRc.left, pageRc.top, 120, sigBtnH, TRUE);
+    int sigBtnH = MulDiv(32, static_cast<int>(s->dpi), 96);
+    MoveWindow(s->btnSigVerify, pageRc.left, pageRc.top, MulDiv(140, static_cast<int>(s->dpi), 96), sigBtnH, TRUE);
     MoveWindow(s->pageSignature, pageRc.left, pageRc.top + sigBtnH + pad, pageW, pageH - sigBtnH - pad, TRUE);
 
     MoveWindow(s->pageHash, pageRc.left, pageRc.top, pageW, pageH, TRUE);
+}
+
+static UINT GetBestWindowDpi(HWND hwnd) {
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    if (user32) {
+        using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
+        auto fn = reinterpret_cast<GetDpiForWindowFn>(GetProcAddress(user32, "GetDpiForWindow"));
+        if (fn) {
+            UINT dpi = fn(hwnd);
+            if (dpi != 0) {
+                return dpi;
+            }
+        }
+    }
+    HDC dc = GetDC(hwnd);
+    int dpi = dc ? GetDeviceCaps(dc, LOGPIXELSY) : 96;
+    if (dc) {
+        ReleaseDC(hwnd, dc);
+    }
+    return (dpi > 0) ? static_cast<UINT>(dpi) : 96;
+}
+
+static HFONT CreateUiFontForDpi(UINT dpi) {
+    NONCLIENTMETRICSW ncm = {};
+    ncm.cbSize = sizeof(ncm);
+
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    if (user32) {
+        using SystemParametersInfoForDpiFn = BOOL(WINAPI*)(UINT, UINT, PVOID, UINT, UINT);
+        auto fn = reinterpret_cast<SystemParametersInfoForDpiFn>(GetProcAddress(user32, "SystemParametersInfoForDpi"));
+        if (fn && fn(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0, dpi)) {
+            return CreateFontIndirectW(&ncm.lfMessageFont);
+        }
+    }
+    if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0)) {
+        return CreateFontIndirectW(&ncm.lfMessageFont);
+    }
+    return reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+}
+
+static void ApplyUiFontAndTheme(GuiState* s) {
+    if (!s->uiFont) {
+        return;
+    }
+
+    HWND controls[] = {
+        s->btnOpen,
+        s->btnRefresh,
+        s->btnExportJson,
+        s->btnExportText,
+        s->btnCopySummary,
+        s->btnSettings,
+        s->fileInfo,
+        s->tab,
+        s->pageSummary,
+        s->pageSections,
+        s->pageImports,
+        s->pageExports,
+        s->pagePdb,
+        s->pageSignature,
+        s->pageHash,
+        s->btnSigVerify,
+    };
+    for (HWND hwnd : controls) {
+        if (hwnd) {
+            SendMessageW(hwnd, WM_SETFONT, reinterpret_cast<WPARAM>(s->uiFont), TRUE);
+        }
+    }
+
+    SetWindowTheme(s->tab, L"Explorer", nullptr);
+    SetWindowTheme(s->pageSections, L"Explorer", nullptr);
+    SetWindowTheme(s->pageImports, L"Explorer", nullptr);
+    SetWindowTheme(s->pageExports, L"Explorer", nullptr);
+
+    int editMargin = MulDiv(8, static_cast<int>(s->dpi), 96);
+    SendMessageW(s->pageSummary, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
+    SendMessageW(s->pagePdb, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
+    SendMessageW(s->pageSignature, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
+    SendMessageW(s->pageHash, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
+
+    DWORD ex = LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP;
+    ListView_SetExtendedListViewStyleEx(s->pageSections, ex, ex);
+    ListView_SetExtendedListViewStyleEx(s->pageImports, ex, ex);
+    ListView_SetExtendedListViewStyleEx(s->pageExports, ex, ex);
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -788,6 +914,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         case WM_CREATE: {
             DragAcceptFiles(hwnd, TRUE);
             s->hwnd = hwnd;
+            s->dpi = GetBestWindowDpi(hwnd);
+            s->uiFont = CreateUiFontForDpi(s->dpi);
 
             s->btnOpen = CreateWindowW(L"BUTTON", L"\u6253\u5f00", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_OPEN), nullptr, nullptr);
             s->btnRefresh = CreateWindowW(L"BUTTON", L"\u5237\u65b0", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_REFRESH), nullptr, nullptr);
@@ -818,37 +946,35 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Hash), &ti);
 
             DWORD editStyle = WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_READONLY;
-            s->pageSummary = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SUMMARY), nullptr, nullptr);
-            s->pagePdb = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_PDB), nullptr, nullptr);
-            s->pageSignature = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SIGNATURE), nullptr, nullptr);
-            s->pageHash = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_HASH), nullptr, nullptr);
+            s->pageSummary = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SUMMARY), nullptr, nullptr);
+            s->pagePdb = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_PDB), nullptr, nullptr);
+            s->pageSignature = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SIGNATURE), nullptr, nullptr);
+            s->pageHash = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_HASH), nullptr, nullptr);
 
             s->btnSigVerify = CreateWindowW(L"BUTTON", L"\u9a8c\u8bc1\u7b7e\u540d", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SIG_VERIFY), nullptr, nullptr);
 
             DWORD listStyle = WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS;
-            s->pageSections = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SECTIONS), nullptr, nullptr);
-            s->pageImports = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS), nullptr, nullptr);
-            s->pageExports = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS), nullptr, nullptr);
+            s->pageSections = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SECTIONS), nullptr, nullptr);
+            s->pageImports = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS), nullptr, nullptr);
+            s->pageExports = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS), nullptr, nullptr);
 
-            ListView_SetExtendedListViewStyle(s->pageSections, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
-            ListView_SetExtendedListViewStyle(s->pageImports, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
-            ListView_SetExtendedListViewStyle(s->pageExports, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+            auto colW = [&](int base) { return MulDiv(base, static_cast<int>(s->dpi), 96); };
+            AddListViewColumn(s->pageSections, 0, colW(140), L"Name");
+            AddListViewColumn(s->pageSections, 1, colW(120), L"RVA");
+            AddListViewColumn(s->pageSections, 2, colW(120), L"VSize");
+            AddListViewColumn(s->pageSections, 3, colW(120), L"RawOff");
+            AddListViewColumn(s->pageSections, 4, colW(120), L"RawSize");
+            AddListViewColumn(s->pageSections, 5, colW(140), L"Chars");
 
-            AddListViewColumn(s->pageSections, 0, 120, L"Name");
-            AddListViewColumn(s->pageSections, 1, 110, L"RVA");
-            AddListViewColumn(s->pageSections, 2, 110, L"VSize");
-            AddListViewColumn(s->pageSections, 3, 110, L"RawOff");
-            AddListViewColumn(s->pageSections, 4, 110, L"RawSize");
-            AddListViewColumn(s->pageSections, 5, 120, L"Chars");
+            AddListViewColumn(s->pageImports, 0, colW(92), L"Type");
+            AddListViewColumn(s->pageImports, 1, colW(260), L"DLL");
+            AddListViewColumn(s->pageImports, 2, colW(340), L"Function");
 
-            AddListViewColumn(s->pageImports, 0, 80, L"Type");
-            AddListViewColumn(s->pageImports, 1, 220, L"DLL");
-            AddListViewColumn(s->pageImports, 2, 260, L"Function");
+            AddListViewColumn(s->pageExports, 0, colW(100), L"Ordinal");
+            AddListViewColumn(s->pageExports, 1, colW(120), L"RVA");
+            AddListViewColumn(s->pageExports, 2, colW(380), L"Name");
 
-            AddListViewColumn(s->pageExports, 0, 80, L"Ordinal");
-            AddListViewColumn(s->pageExports, 1, 110, L"RVA");
-            AddListViewColumn(s->pageExports, 2, 300, L"Name");
-
+            ApplyUiFontAndTheme(s);
             ShowOnlyTab(s, TabIndex::Summary);
             SetBusy(s, false);
             RefreshAllViews(s);
@@ -861,6 +987,26 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
         case WM_SIZE: {
+            UpdateLayout(s);
+            return 0;
+        }
+        case WM_DPICHANGED: {
+            auto* suggested = reinterpret_cast<RECT*>(lParam);
+            if (suggested) {
+                SetWindowPos(hwnd,
+                             nullptr,
+                             suggested->left,
+                             suggested->top,
+                             suggested->right - suggested->left,
+                             suggested->bottom - suggested->top,
+                             SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+            s->dpi = static_cast<UINT>(HIWORD(wParam));
+            if (s->uiFont) {
+                DeleteObject(s->uiFont);
+            }
+            s->uiFont = CreateUiFontForDpi(s->dpi);
+            ApplyUiFontAndTheme(s);
             UpdateLayout(s);
             return 0;
         }
@@ -968,6 +1114,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
         case WM_DESTROY: {
+            if (s->uiFont) {
+                DeleteObject(s->uiFont);
+                s->uiFont = nullptr;
+            }
             PostQuitMessage(0);
             return 0;
         }
@@ -975,7 +1125,21 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
+static void EnableBestDpiAwareness() {
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    if (user32) {
+        using SetProcessDpiAwarenessContextFn = BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT);
+        auto fn = reinterpret_cast<SetProcessDpiAwarenessContextFn>(GetProcAddress(user32, "SetProcessDpiAwarenessContext"));
+        if (fn) {
+            fn(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            return;
+        }
+    }
+    SetProcessDPIAware();
+}
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
+    EnableBestDpiAwareness();
     {
         int argc = 0;
         LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
