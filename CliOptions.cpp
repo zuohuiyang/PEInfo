@@ -78,6 +78,8 @@ std::wstring BuildUsageText() {
     oss << L"  --imports                 Print import DLL/function summary (includes delay-load)\n";
     oss << L"  --imports-all             Print all import functions (no truncation)\n";
     oss << L"  --exports                 Print export summary\n";
+    oss << L"  --resources               Print resource (.rsrc) summary\n";
+    oss << L"  --resources-all           Print resource items (type/name/lang) details\n";
     oss << L"  --pdb                     Print PDB (CodeView RSDS) info if present\n";
     oss << L"  --sig                     Print signature presence and signer info\n";
     oss << L"  --verify                  Verify signature (use exit code)\n";
@@ -87,7 +89,7 @@ std::wstring BuildUsageText() {
     oss << L"  --format <fmt>            text|json (default: text)\n";
     oss << L"  --out <path>              Write output to file (UTF-8)\n";
     oss << L"  --quiet                   Minimal output (best with --format json)\n";
-    oss << L"  --all                     summary+sections+imports+exports+pdb+sig\n";
+    oss << L"  --all                     summary+sections+imports+exports+resources+pdb+sig\n";
     return oss.str();
 }
 
@@ -97,6 +99,8 @@ static CliOptions DefaultOptions() {
     o.showSections = false;
     o.showImports = false;
     o.showExports = false;
+    o.showResources = false;
+    o.resourcesAll = false;
     o.showPdb = false;
     o.showSignature = false;
     o.verifySignature = false;
@@ -147,6 +151,15 @@ CliParseResult ParseCliArgs(int argc, wchar_t* argv[]) {
         }
         if (arg == L"--exports") {
             r.options.showExports = true;
+            continue;
+        }
+        if (arg == L"--resources") {
+            r.options.showResources = true;
+            continue;
+        }
+        if (arg == L"--resources-all") {
+            r.options.showResources = true;
+            r.options.resourcesAll = true;
             continue;
         }
         if (arg == L"--pdb") {
@@ -235,6 +248,7 @@ CliParseResult ParseCliArgs(int argc, wchar_t* argv[]) {
             r.options.showSections = true;
             r.options.showImports = true;
             r.options.showExports = true;
+            r.options.showResources = true;
             r.options.showPdb = true;
             r.options.showSignature = true;
             continue;
@@ -261,4 +275,3 @@ CliParseResult ParseCliArgs(int argc, wchar_t* argv[]) {
     r.exitCode = 0;
     return r;
 }
-

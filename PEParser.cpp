@@ -678,6 +678,31 @@ bool PEParser::GetDebugDirectory(DWORD& rva, DWORD& size) const {
     return true;
 }
 
+bool PEParser::GetResourceDirectory(DWORD& rva, DWORD& size) const {
+    rva = 0;
+    size = 0;
+    if (!m_isValidPE) {
+        return false;
+    }
+
+    IMAGE_DATA_DIRECTORY dir = {};
+    if (m_isPE32Plus && m_ntHeaders64 != nullptr) {
+        dir = m_ntHeaders64->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE];
+    } else if (!m_isPE32Plus && m_ntHeaders32 != nullptr) {
+        dir = m_ntHeaders32->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE];
+    } else {
+        return false;
+    }
+
+    if (dir.VirtualAddress == 0 || dir.Size == 0) {
+        return false;
+    }
+
+    rva = dir.VirtualAddress;
+    size = dir.Size;
+    return true;
+}
+
 bool PEParser::GetSecurityDirectory(DWORD& fileOffset, DWORD& size) const {
     fileOffset = 0;
     size = 0;

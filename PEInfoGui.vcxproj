@@ -163,6 +163,7 @@
     <ClInclude Include="HashCalculator.h" />
     <ClInclude Include="PEDebugInfo.h" />
     <ClInclude Include="PEParser.h" />
+    <ClInclude Include="PEResource.h" />
     <ClInclude Include="PESignature.h" />
     <ClInclude Include="PECore.h" />
     <ClInclude Include="ReportJsonWriter.h" />
@@ -182,6 +183,7 @@
     <ClCompile Include="HashCalculator.cpp" />
     <ClCompile Include="PEDebugInfo.cpp" />
     <ClCompile Include="PEParser.cpp" />
+    <ClCompile Include="PEResource.cpp" />
     <ClCompile Include="PESignature.cpp" />
     <ClCompile Include="PECore.cpp" />
     <ClCompile Include="ReportJsonWriter.cpp" />

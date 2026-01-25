@@ -149,6 +149,7 @@
   <ItemGroup>
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="PEParser.h" />
+    <ClInclude Include="PEResource.h" />
     <ClInclude Include="HashCalculator.h" />
     <ClInclude Include="PECore.h" />
     <ClInclude Include="ReportJsonWriter.h" />
@@ -165,6 +166,7 @@
     <ClCompile Include="CliMain.cpp" />
     <ClCompile Include="CliOptions.cpp" />
     <ClCompile Include="PEParser.cpp" />
+    <ClCompile Include="PEResource.cpp" />
     <ClCompile Include="PEDebugInfo.cpp" />
     <ClCompile Include="PESignature.cpp" />
     <ClCompile Include="HashCalculator.cpp" />

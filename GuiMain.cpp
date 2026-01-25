@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "PECore.h"
+#include "PEResource.h"
 #include "ReportJsonWriter.h"
 #include "ReportTextWriter.h"
 #include "ReportUtil.h"
@@ -44,6 +45,7 @@ enum : UINT {
     IDC_SECTIONS = 2002,
     IDC_IMPORTS = 2003,
     IDC_EXPORTS = 2004,
+    IDC_RESOURCES = 2009,
     IDC_PDB = 2005,
     IDC_SIGNATURE = 2006,
     IDC_HASH = 2007,
@@ -57,9 +59,10 @@ enum class TabIndex : int {
     Sections = 1,
     Imports = 2,
     Exports = 3,
-    DebugPdb = 4,
-    Signature = 5,
-    Hash = 6
+    Resources = 4,
+    DebugPdb = 5,
+    Signature = 6,
+    Hash = 7
 };
 
 struct VerifyResultMessage {
@@ -92,6 +95,7 @@ struct GuiState {
     HWND pageImportsDlls = nullptr;
     HWND pageImports = nullptr;
     HWND pageExports = nullptr;
+    HWND pageResources = nullptr;
     HWND pagePdb = nullptr;
     HWND pageSignature = nullptr;
     HWND pageHash = nullptr;
@@ -482,6 +486,118 @@ static void PopulatePdb(HWND edit, const std::optional<PEPdbInfo>& pdb) {
     SetWindowTextWString(edit, out.str());
 }
 
+static std::wstring FormatResourceIdOrName(const PEResourceNameOrId& v) {
+    if (v.isString) {
+        return v.name;
+    }
+    return std::to_wstring(v.id);
+}
+
+static std::wstring FormatResourceTypeLabel(bool isString, WORD typeId, const std::wstring& typeName) {
+    if (isString) {
+        return typeName;
+    }
+    if (!typeName.empty()) {
+        return typeName + L"(" + std::to_wstring(typeId) + L")";
+    }
+    return HexU32(typeId, 4);
+}
+
+static void PopulateResources(HWND edit, const PEParser& parser) {
+    DWORD rva = 0;
+    DWORD size = 0;
+    if (!parser.GetResourceDirectory(rva, size)) {
+        SetWindowTextWString(edit, L"(none)\r\n");
+        return;
+    }
+
+    std::vector<PEResourceItem> items;
+    std::wstring err;
+    if (!EnumerateResources(parser, items, err)) {
+        std::wostringstream out;
+        out << L"(error)\r\n";
+        if (!err.empty()) {
+            out << L"Error: " << err << L"\r\n";
+        }
+        SetWindowTextWString(edit, out.str());
+        return;
+    }
+
+    PEResourceSummary s = BuildResourceSummary(items);
+    std::wostringstream out;
+    out << L"Types: " << s.typeCount << L"  Items: " << s.itemCount << L"  TotalBytes: " << s.totalBytes << L"\r\n";
+
+    if (!s.types.empty()) {
+        out << L"\r\nTypes:\r\n";
+        for (const auto& t : s.types) {
+            out << L"  " << FormatResourceTypeLabel(t.isString, t.typeId, t.typeName) << L": items=" << t.items << L" bytes=" << t.totalBytes << L"\r\n";
+        }
+    }
+
+    auto vi = TryParseVersionInfo(items, parser);
+    if (vi.has_value()) {
+        out << L"\r\nVersion:\r\n";
+        if (!vi->fileVersion.empty()) out << L"  FileVersion: " << vi->fileVersion << L"\r\n";
+        if (!vi->productVersion.empty()) out << L"  ProductVersion: " << vi->productVersion << L"\r\n";
+        static const wchar_t* keys[] = {L"CompanyName",
+                                        L"FileDescription",
+                                        L"FileVersion",
+                                        L"InternalName",
+                                        L"OriginalFilename",
+                                        L"ProductName",
+                                        L"ProductVersion",
+                                        L"LegalCopyright"};
+        for (const auto* k : keys) {
+            auto it = vi->strings.find(k);
+            if (it != vi->strings.end() && !it->second.empty()) {
+                out << L"  " << k << L": " << it->second << L"\r\n";
+            }
+        }
+    }
+
+    auto mi = TryParseManifest(items, parser, false);
+    if (mi.has_value() && mi->present) {
+        out << L"\r\nManifest:\r\n";
+        out << L"  Encoding: " << (mi->encoding.empty() ? L"unknown" : mi->encoding) << L"  Size: " << mi->size << L"\r\n";
+        if (!mi->requestedExecutionLevel.empty()) {
+            out << L"  requestedExecutionLevel: " << mi->requestedExecutionLevel << L"\r\n";
+        }
+        if (mi->uiAccess.has_value()) {
+            out << L"  uiAccess: " << (*mi->uiAccess ? L"true" : L"false") << L"\r\n";
+        }
+    }
+
+    auto groups = TryParseIconGroups(items, parser);
+    if (!groups.empty()) {
+        out << L"\r\nIcons:\r\n";
+        out << L"  Groups: " << groups.size() << L"\r\n";
+        for (const auto& g : groups) {
+            out << L"  Group " << FormatResourceIdOrName(g.name) << L" (lang " << HexU32(g.language, 4) << L") images=" << g.images.size() << L"\r\n";
+            for (const auto& img : g.images) {
+                out << L"    " << img.width << L"x" << img.height << L" @" << img.bitCount << L"bpp bytes=" << img.bytesInRes << L" iconId=" << img.iconId << L"\r\n";
+            }
+        }
+    }
+
+    if (!items.empty()) {
+        out << L"\r\nItems:\r\n";
+        out << L"  Type | Name | Lang | Size | DataRVA | RawOff\r\n";
+        size_t shown = 0;
+        for (const auto& it : items) {
+            if (shown >= 500) {
+                out << L"  ...\r\n";
+                break;
+            }
+            std::wstring type = it.type.isString ? it.type.name : (!it.type.name.empty() ? it.type.name : HexU32(it.type.id, 4));
+            std::wstring name = FormatResourceIdOrName(it.name);
+            out << L"  " << type << L" | " << name << L" | " << HexU32(it.language, 4) << L" | " << it.size << L" | " << HexU32(it.dataRva, 8) << L" | " << HexU32(it.rawOffset, 8) << L"\r\n";
+            ++shown;
+        }
+    }
+
+    SetWindowTextWString(edit, out.str());
+}
+
 static std::wstring VerifyStatusToString(PESignatureVerifyStatus s) {
     switch (s) {
         case PESignatureVerifyStatus::Valid: return L"Valid";
@@ -765,7 +881,7 @@ static RECT GetTabPageRect(HWND hwndMain, HWND hwndTab) {
 }
 
 static void ShowOnlyTab(GuiState* s, TabIndex idx) {
-    HWND pages[] = {s->pageSummary, s->pageSections, s->pageImports, s->pageExports, s->pagePdb, s->pageSignature, s->pageHash};
+    HWND pages[] = {s->pageSummary, s->pageSections, s->pageImports, s->pageExports, s->pageResources, s->pagePdb, s->pageSignature, s->pageHash};
     for (int i = 0; i < static_cast<int>(std::size(pages)); ++i) {
         ShowWindow(pages[i], (i == static_cast<int>(idx)) ? SW_SHOW : SW_HIDE);
     }
@@ -791,12 +907,14 @@ static void UpdateFileInfo(GuiState* s) {
 
 static void RefreshAllViews(GuiState* s) {
     if (s->analysis == nullptr) {
-        SetWindowTextWString(s->pageSummary, L"\u62d6\u62fd EXE/DLL/SYS \u5230\u7a97\u53e3\uff0c\u6216\u70b9\u51fb\u201c\u6253\u5f00\u201d");
+        std::wstring hint = L"\u62d6\u62fd EXE/DLL/SYS \u5230\u7a97\u53e3\uff0c\u6216\u70b9\u51fb\u201c\u6253\u5f00\u201d";
+        SetWindowTextWString(s->pageSummary, hint);
         ListView_DeleteAllItems(s->pageSections);
         ListView_DeleteAllItems(s->pageImportsDlls);
         ListView_DeleteAllItems(s->pageImports);
         ListView_DeleteAllItems(s->pageExports);
         s->importsAllRows.clear();
+        SetWindowTextWString(s->pageResources, hint);
         SetWindowTextWString(s->pagePdb, L"");
         SetWindowTextWString(s->pageSignature, L"");
         SetWindowTextWString(s->pageHash, L"");
@@ -809,6 +927,7 @@ static void RefreshAllViews(GuiState* s) {
     BuildImportRowsFromParser(s->importsAllRows, s->analysis->parser);
     ApplyImportsFilterNow(s);
     PopulateExports(s->pageExports, s->analysis->parser);
+    PopulateResources(s->pageResources, s->analysis->parser);
     PopulatePdb(s->pagePdb, s->analysis->pdb);
     PopulateSignature(s->pageSignature, *s->analysis, IsVerifyInFlightForCurrent(s));
     PopulateHash(s->pageHash, s->analysis->hashes);
@@ -919,6 +1038,7 @@ static void StartAnalysis(GuiState* s, const std::wstring& filePath) {
     s->analysis.reset();
     SetBusy(s, true);
     SetWindowTextWString(s->pageSummary, L"\u6b63\u5728\u89e3\u6790...");
+    SetWindowTextWString(s->pageResources, L"\u6b63\u5728\u89e3\u6790...");
     UpdateFileInfo(s);
 
     auto* payload = new std::pair<HWND, std::wstring>(s->hwnd, filePath);
@@ -980,6 +1100,8 @@ static void ExportJson(GuiState* s) {
     ro.showSections = true;
     ro.showImports = true;
     ro.showExports = true;
+    ro.showResources = true;
+    ro.resourcesAll = true;
     ro.showPdb = true;
     ro.showSignature = true;
     ro.importsAll = true;
@@ -1013,6 +1135,8 @@ static void ExportText(GuiState* s) {
     ro.showSections = true;
     ro.showImports = true;
     ro.showExports = true;
+    ro.showResources = true;
+    ro.resourcesAll = true;
     ro.showPdb = true;
     ro.showSignature = true;
     ro.importsAll = true;
@@ -1114,6 +1238,7 @@ static void UpdateLayout(GuiState* s) {
     MoveWindow(s->pageImportsDlls, pageRc.left, importsY, leftW, importsH, TRUE);
     MoveWindow(s->pageImports, pageRc.left + leftW + splitGap, importsY, rightW, importsH, TRUE);
     MoveWindow(s->pageExports, pageRc.left, pageRc.top, pageW, pageH, TRUE);
+    MoveWindow(s->pageResources, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pagePdb, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pageSignature, pageRc.left, pageRc.top, pageW, pageH, TRUE);
 
@@ -1177,6 +1302,7 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->pageImportsDlls,
         s->pageImports,
         s->pageExports,
+        s->pageResources,
         s->pagePdb,
         s->pageSignature,
         s->pageHash,
@@ -1198,6 +1324,7 @@ static void ApplyUiFontAndTheme(GuiState* s) {
 
     int editMargin = MulDiv(8, static_cast<int>(s->dpi), 96);
     SendMessageW(s->pageSummary, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
+    SendMessageW(s->pageResources, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
     SendMessageW(s->pagePdb, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
     SendMessageW(s->pageSignature, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
     SendMessageW(s->pageHash, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
@@ -1260,6 +1387,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Imports), &ti);
             ti.pszText = const_cast<wchar_t*>(L"Exports");
             TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Exports), &ti);
+            ti.pszText = const_cast<wchar_t*>(L"Resources");
+            TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Resources), &ti);
             ti.pszText = const_cast<wchar_t*>(L"Debug/PDB");
             TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::DebugPdb), &ti);
             ti.pszText = const_cast<wchar_t*>(L"Signature");
@@ -1269,6 +1398,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             DWORD editStyle = WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_READONLY;
             s->pageSummary = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SUMMARY), nullptr, nullptr);
+            s->pageResources = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_RESOURCES), nullptr, nullptr);
             s->pagePdb = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_PDB), nullptr, nullptr);
             s->pageSignature = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SIGNATURE), nullptr, nullptr);
             s->pageHash = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_HASH), nullptr, nullptr);
@@ -1524,6 +1654,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
                 ro.showSections = true;
                 ro.showImports = true;
                 ro.showExports = true;
+                ro.showResources = true;
+                ro.resourcesAll = true;
                 ro.showPdb = true;
                 ro.showSignature = true;
                 ro.importsAll = true;

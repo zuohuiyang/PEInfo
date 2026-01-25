@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "ReportJsonWriter.h"
+#include "PEResource.h"
 #include "ReportUtil.h"
 
 #include <iomanip>
@@ -151,6 +152,157 @@ std::string BuildJsonReport(const ReportOptions& opt,
             oss << "}";
         }
         oss << "]";
+    }
+
+    if (opt.showResources) {
+        DWORD rva = 0;
+        DWORD size = 0;
+        bool present = parser.GetResourceDirectory(rva, size);
+
+        oss << ",\"resources\":{";
+        oss << "\"present\":" << (present ? "true" : "false");
+
+        if (present) {
+            std::vector<PEResourceItem> items;
+            std::wstring err;
+            if (!EnumerateResources(parser, items, err)) {
+                oss << ",\"error\":" << JsonQuoteWide(err);
+            } else {
+                PEResourceSummary s = BuildResourceSummary(items);
+                s.present = true;
+
+                oss << ",\"stats\":{";
+                oss << "\"types\":" << s.typeCount;
+                oss << ",\"items\":" << s.itemCount;
+                oss << ",\"totalBytes\":" << s.totalBytes;
+                oss << "}";
+
+                oss << ",\"types\":[";
+                for (size_t i = 0; i < s.types.size(); ++i) {
+                    if (i) oss << ",";
+                    const auto& t = s.types[i];
+                    oss << "{";
+                    if (!t.isString) {
+                        oss << "\"typeId\":" << t.typeId;
+                        oss << ",\"typeName\":" << JsonQuoteWide(t.typeName);
+                    } else {
+                        oss << "\"typeName\":" << JsonQuoteWide(t.typeName);
+                    }
+                    oss << ",\"items\":" << t.items;
+                    oss << ",\"totalBytes\":" << t.totalBytes;
+                    oss << "}";
+                }
+                oss << "]";
+
+                if (opt.resourcesAll) {
+                    oss << ",\"items\":[";
+                    for (size_t i = 0; i < items.size(); ++i) {
+                        if (i) oss << ",";
+                        const auto& it = items[i];
+                        oss << "{";
+                        if (!it.type.isString) {
+                            oss << "\"typeId\":" << it.type.id;
+                            oss << ",\"typeName\":" << JsonQuoteWide(it.type.name);
+                        } else {
+                            oss << "\"typeName\":" << JsonQuoteWide(it.type.name);
+                        }
+                        if (it.name.isString) {
+                            oss << ",\"name\":" << JsonQuoteWide(it.name.name);
+                        } else {
+                            oss << ",\"nameId\":" << it.name.id;
+                        }
+                        oss << ",\"langId\":" << it.language;
+                        if (!it.languageName.empty()) {
+                            oss << ",\"langName\":" << JsonQuoteWide(it.languageName);
+                        }
+                        oss << ",\"size\":" << it.size;
+                        oss << ",\"dataRva\":" << it.dataRva;
+                        oss << ",\"rawOff\":" << it.rawOffset;
+                        if (it.codePage != 0) {
+                            oss << ",\"codePage\":" << it.codePage;
+                        }
+                        oss << "}";
+                    }
+                    oss << "]";
+                }
+
+                auto vi = TryParseVersionInfo(items, parser);
+                if (vi.has_value()) {
+                    oss << ",\"versionInfo\":{";
+                    oss << "\"fixed\":{";
+                    oss << "\"fileVersion\":" << JsonQuoteWide(vi->fileVersion);
+                    oss << ",\"productVersion\":" << JsonQuoteWide(vi->productVersion);
+                    oss << ",\"fileFlags\":" << vi->fileFlags;
+                    oss << ",\"fileOS\":" << vi->fileOS;
+                    oss << ",\"fileType\":" << vi->fileType;
+                    oss << ",\"fileSubType\":" << vi->fileSubType;
+                    oss << "}";
+                    oss << ",\"strings\":{";
+                    bool first = true;
+                    for (const auto& kv : vi->strings) {
+                        if (!first) oss << ",";
+                        first = false;
+                        oss << JsonQuoteWide(kv.first) << ":" << JsonQuoteWide(kv.second);
+                    }
+                    oss << "}";
+                    oss << "}";
+                }
+
+                auto mi = TryParseManifest(items, parser, opt.resourcesAll);
+                if (mi.has_value() && mi->present) {
+                    oss << ",\"manifest\":{";
+                    oss << "\"present\":true";
+                    oss << ",\"size\":" << mi->size;
+                    oss << ",\"encoding\":" << JsonQuoteWide(mi->encoding.empty() ? L"unknown" : mi->encoding);
+                    if (!mi->requestedExecutionLevel.empty()) {
+                        oss << ",\"requestedExecutionLevel\":" << JsonQuoteWide(mi->requestedExecutionLevel);
+                    }
+                    if (mi->uiAccess.has_value()) {
+                        oss << ",\"uiAccess\":" << (*mi->uiAccess ? "true" : "false");
+                    }
+                    if (opt.resourcesAll && !mi->text.empty()) {
+                        oss << ",\"text\":" << JsonQuoteWide(mi->text);
+                    }
+                    oss << "}";
+                }
+
+                auto groups = TryParseIconGroups(items, parser);
+                if (!groups.empty()) {
+                    oss << ",\"icons\":{";
+                    oss << "\"groupCount\":" << groups.size();
+                    oss << ",\"groups\":[";
+                    for (size_t i = 0; i < groups.size(); ++i) {
+                        if (i) oss << ",";
+                        const auto& g = groups[i];
+                        oss << "{";
+                        if (g.name.isString) {
+                            oss << "\"name\":" << JsonQuoteWide(g.name.name);
+                        } else {
+                            oss << "\"nameId\":" << g.name.id;
+                        }
+                        oss << ",\"langId\":" << g.language;
+                        oss << ",\"images\":[";
+                        for (size_t j = 0; j < g.images.size(); ++j) {
+                            if (j) oss << ",";
+                            const auto& img = g.images[j];
+                            oss << "{";
+                            oss << "\"width\":" << img.width;
+                            oss << ",\"height\":" << img.height;
+                            oss << ",\"bitCount\":" << img.bitCount;
+                            oss << ",\"bytesInRes\":" << img.bytesInRes;
+                            oss << ",\"iconId\":" << img.iconId;
+                            oss << "}";
+                        }
+                        oss << "]";
+                        oss << "}";
+                    }
+                    oss << "]";
+                    oss << "}";
+                }
+            }
+        }
+
+        oss << "}";
     }
 
     if (opt.showPdb) {

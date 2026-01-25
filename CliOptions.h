@@ -29,6 +29,8 @@ struct CliOptions {
     bool showSections;
     bool showImports;
     bool showExports;
+    bool showResources;
+    bool resourcesAll;
     bool showPdb;
     bool showSignature;
     bool verifySignature;
@@ -51,4 +53,3 @@ struct CliParseResult {
 
 std::wstring BuildUsageText();
 CliParseResult ParseCliArgs(int argc, wchar_t* argv[]);
-

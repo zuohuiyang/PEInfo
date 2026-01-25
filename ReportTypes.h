@@ -13,6 +13,8 @@ struct ReportOptions {
     bool showSections = true;
     bool showImports = true;
     bool showExports = true;
+    bool showResources = false;
+    bool resourcesAll = false;
     bool showPdb = true;
     bool showSignature = true;
     bool importsAll = true;

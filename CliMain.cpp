@@ -36,6 +36,8 @@ static ReportOptions MakeReportOptions(const CliOptions& opt) {
     ro.showSections = opt.showSections;
     ro.showImports = opt.showImports;
     ro.showExports = opt.showExports;
+    ro.showResources = opt.showResources;
+    ro.resourcesAll = opt.resourcesAll;
     ro.showPdb = opt.showPdb;
     ro.showSignature = opt.showSignature;
     ro.importsAll = opt.importsAll;

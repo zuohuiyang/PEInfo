@@ -64,6 +64,7 @@ public:
     DWORD RVAToFileOffsetPublic(DWORD rva) const;
     bool ReadBytes(DWORD offset, void* buffer, size_t size) const;
     bool GetDebugDirectory(DWORD& rva, DWORD& size) const;
+    bool GetResourceDirectory(DWORD& rva, DWORD& size) const;
     bool GetSecurityDirectory(DWORD& fileOffset, DWORD& size) const;
 
 private:

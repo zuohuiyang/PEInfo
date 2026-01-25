@@ -1,8 +1,10 @@
 #include "stdafx.h"
 #include "ReportTextWriter.h"
+#include "PEResource.h"
 #include "ReportUtil.h"
 
 #include <iomanip>
+#include <algorithm>
 #include <sstream>
 
 namespace {
@@ -103,6 +105,157 @@ static void PrintExportsSummary(std::wostream& os, const std::vector<PEExportFun
     }
 }
 
+static std::wstring FormatResourceId(const PEResourceNameOrId& id) {
+    if (id.isString) {
+        return id.name;
+    }
+    return std::to_wstring(id.id);
+}
+
+static std::wstring FormatResourceType(const PEResourceNameOrId& id) {
+    if (id.isString) {
+        return id.name;
+    }
+    if (!id.name.empty()) {
+        return id.name;
+    }
+    return HexU32(id.id, 4);
+}
+
+static void PrintResources(std::wostream& os, const PEParser& parser, bool resourcesAll) {
+    DWORD rva = 0;
+    DWORD size = 0;
+    if (!parser.GetResourceDirectory(rva, size)) {
+        os << L"Resources: (none)\n";
+        return;
+    }
+
+    std::vector<PEResourceItem> items;
+    std::wstring err;
+    if (!EnumerateResources(parser, items, err)) {
+        os << L"Resources: (error)\n";
+        if (!err.empty()) {
+            os << L"  Error: " << err << L"\n";
+        }
+        return;
+    }
+
+    PEResourceSummary s = BuildResourceSummary(items);
+    s.present = true;
+
+    os << L"Resources:\n";
+    os << L"  Types: " << s.typeCount << L"  Items: " << s.itemCount << L"  TotalBytes: " << s.totalBytes << L"\n";
+
+    if (!s.types.empty()) {
+        os << L"  Types:\n";
+        for (const auto& t : s.types) {
+            std::wstring name;
+            if (t.isString) {
+                name = t.typeName;
+            } else if (t.typeName.empty()) {
+                name = HexU32(t.typeId, 4);
+            } else {
+                name = t.typeName + L"(" + std::to_wstring(t.typeId) + L")";
+            }
+            os << L"    " << name << L": items=" << t.items << L" bytes=" << t.totalBytes << L"\n";
+        }
+    }
+
+    auto vi = TryParseVersionInfo(items, parser);
+    if (vi.has_value()) {
+        os << L"  Version:\n";
+        if (!vi->fileVersion.empty()) os << L"    FileVersion: " << vi->fileVersion << L"\n";
+        if (!vi->productVersion.empty()) os << L"    ProductVersion: " << vi->productVersion << L"\n";
+        static const wchar_t* keys[] = {L"CompanyName",
+                                        L"FileDescription",
+                                        L"FileVersion",
+                                        L"InternalName",
+                                        L"OriginalFilename",
+                                        L"ProductName",
+                                        L"ProductVersion",
+                                        L"LegalCopyright"};
+        for (const auto* k : keys) {
+            auto it = vi->strings.find(k);
+            if (it != vi->strings.end() && !it->second.empty()) {
+                os << L"    " << k << L": " << it->second << L"\n";
+            }
+        }
+    }
+
+    auto mi = TryParseManifest(items, parser, resourcesAll);
+    if (mi.has_value() && mi->present) {
+        os << L"  Manifest:\n";
+        os << L"    Encoding: " << (mi->encoding.empty() ? L"unknown" : mi->encoding) << L"  Size: " << mi->size << L"\n";
+        if (!mi->requestedExecutionLevel.empty()) {
+            os << L"    requestedExecutionLevel: " << mi->requestedExecutionLevel << L"\n";
+        }
+        if (mi->uiAccess.has_value()) {
+            os << L"    uiAccess: " << (*mi->uiAccess ? L"true" : L"false") << L"\n";
+        }
+        if (resourcesAll && !mi->text.empty()) {
+            std::wistringstream iss(mi->text);
+            os << L"    ManifestText:\n";
+            std::wstring line;
+            size_t shown = 0;
+            while (std::getline(iss, line)) {
+                os << L"      " << line << L"\n";
+                if (++shown >= 20) {
+                    if (!iss.eof()) {
+                        os << L"      ...\n";
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    auto groups = TryParseIconGroups(items, parser);
+    if (!groups.empty()) {
+        os << L"  Icons:\n";
+        os << L"    Groups: " << groups.size() << L"\n";
+        for (const auto& g : groups) {
+            os << L"    Group " << FormatResourceId(g.name) << L" (lang " << HexU32(g.language, 4) << L"): images=" << g.images.size() << L"\n";
+            for (const auto& img : g.images) {
+                os << L"      " << img.width << L"x" << img.height << L" @" << img.bitCount << L"bpp  bytes=" << img.bytesInRes << L"  iconId=" << img.iconId << L"\n";
+            }
+        }
+    }
+
+    if (resourcesAll && !items.empty()) {
+        std::sort(items.begin(), items.end(), [](const PEResourceItem& a, const PEResourceItem& b) {
+            WORD at = a.type.isString ? 0 : a.type.id;
+            WORD bt = b.type.isString ? 0 : b.type.id;
+            if (at != bt) return at < bt;
+            if (a.name.isString != b.name.isString) return a.name.isString < b.name.isString;
+            if (!a.name.isString && a.name.id != b.name.id) return a.name.id < b.name.id;
+            if (a.language != b.language) return a.language < b.language;
+            return a.size < b.size;
+        });
+
+        os << L"  Items:\n";
+        os << L"    Type           Name        Lang      Size     DataRVA   RawOff\n";
+        size_t shown = 0;
+        for (const auto& it : items) {
+            if (shown >= 500) {
+                os << L"    ...\n";
+                break;
+            }
+            std::wstring type = FormatResourceType(it.type);
+            if (type.size() > 13) type.resize(13);
+            std::wstring name = FormatResourceId(it.name);
+            if (name.size() > 10) name.resize(10);
+            os << L"    " << std::left << std::setw(13) << std::setfill(L' ') << type << std::right
+               << L" " << std::left << std::setw(10) << name << std::right
+               << L" " << HexU32(it.language, 4)
+               << L"  " << std::setw(7) << it.size
+               << L"  " << HexU32(it.dataRva, 8)
+               << L"  " << HexU32(it.rawOffset, 8)
+               << L"\n";
+            ++shown;
+        }
+    }
+}
+
 static void PrintPdbInfo(std::wostream& os, const std::optional<PEPdbInfo>& pdbOpt) {
     if (!pdbOpt.has_value() || !pdbOpt->hasRsds) {
         os << L"PDB: (none)\n";
@@ -198,6 +351,9 @@ std::wstring BuildTextReport(const ReportOptions& opt,
         }
         if (opt.showExports) {
             PrintExportsSummary(out, parser.GetExports(), maxExports);
+        }
+        if (opt.showResources) {
+            PrintResources(out, parser, opt.resourcesAll);
         }
         if (opt.showPdb) {
             PrintPdbInfo(out, pdbOpt);
