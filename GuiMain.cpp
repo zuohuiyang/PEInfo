@@ -12,6 +12,8 @@
 #include <uxtheme.h>
 #include <process.h>
 
+#include <algorithm>
+#include <cwctype>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -21,6 +23,7 @@ static const wchar_t* kMainClassName = L"PEInfoGuiMainWindow";
 
 static const UINT WM_APP_ANALYSIS_DONE = WM_APP + 1;
 static const UINT WM_APP_VERIFY_DONE = WM_APP + 2;
+static const UINT_PTR kTimerImportsFilter = 1;
 
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 DECLARE_HANDLE(DPI_AWARENESS_CONTEXT);
@@ -43,6 +46,8 @@ enum : UINT {
     IDC_PDB = 2005,
     IDC_SIGNATURE = 2006,
     IDC_HASH = 2007,
+    IDC_IMPORTS_FILTER = 2101,
+    IDC_IMPORTS_CLEAR = 2102,
     IDC_SIG_VERIFY = 3001
 };
 
@@ -88,6 +93,9 @@ struct GuiState {
     HWND pageSignature = nullptr;
     HWND pageHash = nullptr;
     HWND btnSigVerify = nullptr;
+    HWND importsFilterLabel = nullptr;
+    HWND importsFilterEdit = nullptr;
+    HWND importsClearBtn = nullptr;
 
     bool busy = false;
     std::wstring currentFile;
@@ -96,6 +104,14 @@ struct GuiState {
 
     HFONT uiFont = nullptr;
     UINT dpi = 96;
+
+    struct ImportRow {
+        std::wstring type;
+        std::wstring dll;
+        std::wstring function;
+        std::wstring haystackLower;
+    };
+    std::vector<ImportRow> importsAllRows;
 };
 
 static UINT GetBestWindowDpi(HWND hwnd);
@@ -118,6 +134,30 @@ static std::wstring GetControlText(HWND hwnd) {
     GetWindowTextW(hwnd, s.data(), len + 1);
     s.resize(wcslen(s.c_str()));
     return s;
+}
+
+static std::wstring ToLowerString(const std::wstring& s) {
+    std::wstring out = s;
+    std::transform(out.begin(), out.end(), out.begin(), [](wchar_t ch) { return static_cast<wchar_t>(towlower(ch)); });
+    return out;
+}
+
+static std::vector<std::wstring> TokenizeQueryLower(const std::wstring& qLower) {
+    std::vector<std::wstring> tokens;
+    size_t i = 0;
+    while (i < qLower.size()) {
+        while (i < qLower.size() && iswspace(qLower[i])) {
+            ++i;
+        }
+        size_t start = i;
+        while (i < qLower.size() && !iswspace(qLower[i])) {
+            ++i;
+        }
+        if (i > start) {
+            tokens.push_back(qLower.substr(start, i - start));
+        }
+    }
+    return tokens;
 }
 
 static bool CopyToClipboard(HWND hwnd, const std::wstring& text) {
@@ -218,24 +258,66 @@ static void PopulateExports(HWND list, const PEParser& parser) {
     }
 }
 
-static void PopulateImports(HWND list, const PEParser& parser) {
+static void PopulateImports(HWND list, const std::vector<GuiState::ImportRow>& rows) {
     ListView_DeleteAllItems(list);
 
-    int row = 0;
+    for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
+        const auto& r = rows[static_cast<size_t>(i)];
+        SetListViewText(list, i, 0, r.type);
+        SetListViewText(list, i, 1, r.dll);
+        SetListViewText(list, i, 2, r.function);
+    }
+}
+
+static void BuildImportRowsFromParser(std::vector<GuiState::ImportRow>& out, const PEParser& parser) {
+    out.clear();
+
     auto addDlls = [&](const std::vector<PEImportDLL>& dlls, const wchar_t* type) {
         for (const auto& d : dlls) {
             std::wstring dllName = ToWStringUtf8BestEffort(d.dllName);
             for (const auto& fn : d.functions) {
-                SetListViewText(list, row, 0, type);
-                SetListViewText(list, row, 1, dllName);
-                SetListViewText(list, row, 2, ToWStringUtf8BestEffort(fn.name));
-                ++row;
+                GuiState::ImportRow r;
+                r.type = type;
+                r.dll = dllName;
+                r.function = ToWStringUtf8BestEffort(fn.name);
+                r.haystackLower = ToLowerString(r.type + L" " + r.dll + L" " + r.function);
+                out.push_back(std::move(r));
             }
         }
     };
 
     addDlls(parser.GetImports(), L"Import");
     addDlls(parser.GetDelayImports(), L"Delay");
+}
+
+static void ApplyImportsFilterNow(GuiState* s) {
+    if (!s->importsFilterEdit) {
+        return;
+    }
+
+    std::wstring q = GetControlText(s->importsFilterEdit);
+    std::wstring qLower = ToLowerString(q);
+    std::vector<std::wstring> tokens = TokenizeQueryLower(qLower);
+    if (tokens.empty()) {
+        PopulateImports(s->pageImports, s->importsAllRows);
+        return;
+    }
+
+    std::vector<GuiState::ImportRow> filtered;
+    filtered.reserve(s->importsAllRows.size());
+    for (const auto& r : s->importsAllRows) {
+        bool ok = true;
+        for (const auto& t : tokens) {
+            if (r.haystackLower.find(t) == std::wstring::npos) {
+                ok = false;
+                break;
+            }
+        }
+        if (ok) {
+            filtered.push_back(r);
+        }
+    }
+    PopulateImports(s->pageImports, filtered);
 }
 
 static void PopulatePdb(HWND edit, const std::optional<PEPdbInfo>& pdb) {
@@ -535,6 +617,10 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
         ShowWindow(pages[i], (i == static_cast<int>(idx)) ? SW_SHOW : SW_HIDE);
     }
     ShowWindow(s->btnSigVerify, (idx == TabIndex::Signature) ? SW_SHOW : SW_HIDE);
+    bool showImportsFilter = (idx == TabIndex::Imports);
+    ShowWindow(s->importsFilterLabel, showImportsFilter ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->importsFilterEdit, showImportsFilter ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->importsClearBtn, showImportsFilter ? SW_SHOW : SW_HIDE);
 }
 
 static void UpdateFileInfo(GuiState* s) {
@@ -556,6 +642,7 @@ static void RefreshAllViews(GuiState* s) {
         ListView_DeleteAllItems(s->pageSections);
         ListView_DeleteAllItems(s->pageImports);
         ListView_DeleteAllItems(s->pageExports);
+        s->importsAllRows.clear();
         SetWindowTextWString(s->pagePdb, L"");
         SetWindowTextWString(s->pageSignature, L"");
         SetWindowTextWString(s->pageHash, L"");
@@ -565,7 +652,8 @@ static void RefreshAllViews(GuiState* s) {
 
     SetWindowTextWString(s->pageSummary, FormatSummaryText(*s->analysis));
     PopulateSections(s->pageSections, s->analysis->parser);
-    PopulateImports(s->pageImports, s->analysis->parser);
+    BuildImportRowsFromParser(s->importsAllRows, s->analysis->parser);
+    ApplyImportsFilterNow(s);
     PopulateExports(s->pageExports, s->analysis->parser);
     PopulatePdb(s->pagePdb, s->analysis->pdb);
     PopulateSignature(s->pageSignature, *s->analysis);
@@ -796,7 +884,22 @@ static void UpdateLayout(GuiState* s) {
 
     MoveWindow(s->pageSummary, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pageSections, pageRc.left, pageRc.top, pageW, pageH, TRUE);
-    MoveWindow(s->pageImports, pageRc.left, pageRc.top, pageW, pageH, TRUE);
+    int filterH = MulDiv(28, static_cast<int>(s->dpi), 96);
+    int filterLabelW = MulDiv(56, static_cast<int>(s->dpi), 96);
+    int filterBtnW = MulDiv(72, static_cast<int>(s->dpi), 96);
+    int filterY = pageRc.top;
+    int filterX = pageRc.left;
+    int filterGap = pad;
+    int filterEditX = filterX + filterLabelW + filterGap;
+    int filterEditW = pageW - filterLabelW - filterGap - filterBtnW - filterGap;
+    if (filterEditW < MulDiv(100, static_cast<int>(s->dpi), 96)) {
+        filterEditW = MulDiv(100, static_cast<int>(s->dpi), 96);
+    }
+
+    MoveWindow(s->importsFilterLabel, filterX, filterY, filterLabelW, filterH, TRUE);
+    MoveWindow(s->importsFilterEdit, filterEditX, filterY, filterEditW, filterH, TRUE);
+    MoveWindow(s->importsClearBtn, filterEditX + filterEditW + filterGap, filterY, filterBtnW, filterH, TRUE);
+    MoveWindow(s->pageImports, pageRc.left, pageRc.top + filterH + pad, pageW, pageH - filterH - pad, TRUE);
     MoveWindow(s->pageExports, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pagePdb, pageRc.left, pageRc.top, pageW, pageH, TRUE);
 
@@ -867,6 +970,9 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->pageSignature,
         s->pageHash,
         s->btnSigVerify,
+        s->importsFilterLabel,
+        s->importsFilterEdit,
+        s->importsClearBtn,
     };
     for (HWND hwnd : controls) {
         if (hwnd) {
@@ -961,6 +1067,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->pageSections = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SECTIONS), nullptr, nullptr);
             s->pageImports = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS), nullptr, nullptr);
             s->pageExports = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS), nullptr, nullptr);
+
+            DWORD filterLabelStyle = WS_CHILD | SS_LEFT | SS_CENTERIMAGE;
+            s->importsFilterLabel = CreateWindowW(L"STATIC", L"\u8fc7\u6ee4\uff1a", filterLabelStyle, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
+            DWORD filterEditStyle = WS_CHILD | ES_LEFT | ES_AUTOHSCROLL;
+            s->importsFilterEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", filterEditStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS_FILTER), nullptr, nullptr);
+            s->importsClearBtn = CreateWindowW(L"BUTTON", L"\u6e05\u7a7a", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS_CLEAR), nullptr, nullptr);
 
             auto colW = [&](int base) { return MulDiv(base, static_cast<int>(s->dpi), 96); };
             AddListViewColumn(s->pageSections, 0, colW(140), L"Name");
@@ -1064,6 +1176,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     CloseHandle(reinterpret_cast<HANDLE>(th));
                     return 0;
                 }
+                case IDC_IMPORTS_FILTER: {
+                    if (HIWORD(wParam) == EN_CHANGE) {
+                        SetTimer(hwnd, kTimerImportsFilter, 200, nullptr);
+                    }
+                    return 0;
+                }
+                case IDC_IMPORTS_CLEAR: {
+                    if (s->importsFilterEdit) {
+                        SetWindowTextW(s->importsFilterEdit, L"");
+                    }
+                    KillTimer(hwnd, kTimerImportsFilter);
+                    ApplyImportsFilterNow(s);
+                    return 0;
+                }
+            }
+            break;
+        }
+        case WM_TIMER: {
+            if (wParam == kTimerImportsFilter) {
+                KillTimer(hwnd, kTimerImportsFilter);
+                ApplyImportsFilterNow(s);
+                return 0;
             }
             break;
         }
