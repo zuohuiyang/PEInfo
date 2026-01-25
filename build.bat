@@ -38,6 +38,8 @@ if /I "%PLATFORM%"=="Win32" set OUTDIR=%CONFIG%
 
 set EXE_PATH=%CD%\%OUTDIR%\PEInfo.exe
 set PDB_PATH=%CD%\%OUTDIR%\PEInfo.pdb
+set GUI_EXE_PATH=%CD%\%OUTDIR%\PEInfoGui.exe
+set GUI_PDB_PATH=%CD%\%OUTDIR%\PEInfoGui.pdb
 
 echo 打包构建产物到 dist\PEInfo_%PLATFORM%_%CONFIG%.zip
 if not exist dist mkdir dist
@@ -46,6 +48,8 @@ if not exist dist\%PLATFORM%\%CONFIG% mkdir dist\%PLATFORM%\%CONFIG%
 
 copy /Y "%EXE_PATH" "dist\%PLATFORM%\%CONFIG%\PEInfo.exe" >nul
 if exist "%PDB_PATH" copy /Y "%PDB_PATH" "dist\%PLATFORM%\%CONFIG%\vc143.pdb" >nul
+if exist "%GUI_EXE_PATH" copy /Y "%GUI_EXE_PATH" "dist\%PLATFORM%\%CONFIG%\PEInfoGui.exe" >nul
+if exist "%GUI_PDB_PATH" copy /Y "%GUI_PDB_PATH" "dist\%PLATFORM%\%CONFIG%\PEInfoGui.pdb" >nul
 
 tar -a -c -f "dist\PEInfo_%PLATFORM%_%CONFIG%.zip" -C "dist\%PLATFORM%\%CONFIG%" . >nul
 if %errorlevel% neq 0 (

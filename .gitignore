@@ -51,5 +51,9 @@ test_build/Testing/
 *.res
 artifacts/
 
+# Local verification artifacts
+/_cli.*
+/_gui.*
+
 # Trae IDE
 /.trae/
