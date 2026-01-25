@@ -539,21 +539,15 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
 
 static void UpdateFileInfo(GuiState* s) {
     if (s->analysis == nullptr) {
-        SetWindowTextWString(s->fileInfo, L"\u672a\u6253\u5f00\u6587\u4ef6");
+        if (!s->currentFile.empty()) {
+            SetWindowTextWString(s->fileInfo, s->currentFile);
+        } else {
+            SetWindowTextWString(s->fileInfo, L"\u672a\u6253\u5f00\u6587\u4ef6");
+        }
         return;
     }
 
-    const auto& h = s->analysis->parser.GetHeaderInfo();
-    std::wostringstream out;
-    out << s->analysis->filePath << L"\r\n";
-    out << L"Bitness: " << (h.is64Bit ? L"x64" : (h.is32Bit ? L"x86" : L"Unknown"));
-    if (s->analysis->signaturePresenceReady) {
-        out << L"    Signature: " << SigPresenceToText(s->analysis->signaturePresence);
-    }
-    if (s->analysis->reportHash.has_value()) {
-        out << L"    SHA256: " << s->analysis->reportHash->result;
-    }
-    SetWindowTextWString(s->fileInfo, out.str());
+    SetWindowTextWString(s->fileInfo, s->analysis->filePath);
 }
 
 static void RefreshAllViews(GuiState* s) {
@@ -789,7 +783,7 @@ static void UpdateLayout(GuiState* s) {
     MoveWindow(s->btnSettings, x, row1Y, btnW, btnH, TRUE);
 
     int fileInfoY = row1Y + btnH + pad;
-    int fileInfoH = MulDiv(48, static_cast<int>(s->dpi), 96);
+    int fileInfoH = MulDiv(24, static_cast<int>(s->dpi), 96);
     MoveWindow(s->fileInfo, pad, fileInfoY, w - 2 * pad, fileInfoH, TRUE);
 
     int tabY = fileInfoY + fileInfoH + pad;
@@ -924,7 +918,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->btnCopySummary = CreateWindowW(L"BUTTON", L"\u590d\u5236\u6458\u8981", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_COPY_SUMMARY), nullptr, nullptr);
             s->btnSettings = CreateWindowW(L"BUTTON", L"\u8bbe\u7f6e", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_SETTINGS), nullptr, nullptr);
 
-            s->fileInfo = CreateWindowW(L"STATIC", L"\u672a\u6253\u5f00\u6587\u4ef6", WS_CHILD | WS_VISIBLE | SS_LEFT, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_FILEINFO), nullptr, nullptr);
+            s->fileInfo = CreateWindowW(L"STATIC",
+                                        L"\u672a\u6253\u5f00\u6587\u4ef6",
+                                        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        hwnd,
+                                        reinterpret_cast<HMENU>(IDC_FILEINFO),
+                                        nullptr,
+                                        nullptr);
 
             s->tab = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_TAB), nullptr, nullptr);
 
