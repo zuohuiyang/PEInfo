@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cwctype>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -46,6 +47,7 @@ enum : UINT {
     IDC_PDB = 2005,
     IDC_SIGNATURE = 2006,
     IDC_HASH = 2007,
+    IDC_IMPORTS_DLLS = 2008,
     IDC_IMPORTS_FILTER = 2101,
     IDC_IMPORTS_CLEAR = 2102
 };
@@ -87,6 +89,7 @@ struct GuiState {
 
     HWND pageSummary = nullptr;
     HWND pageSections = nullptr;
+    HWND pageImportsDlls = nullptr;
     HWND pageImports = nullptr;
     HWND pageExports = nullptr;
     HWND pagePdb = nullptr;
@@ -98,6 +101,7 @@ struct GuiState {
 
     bool busy = false;
     bool verifyInFlight = false;
+    bool importsSyncingSelection = false;
     std::wstring currentFile;
     std::wstring pendingFile;
     std::wstring verifyInFlightFile;
@@ -113,6 +117,7 @@ struct GuiState {
         std::wstring haystackLower;
     };
     std::vector<ImportRow> importsAllRows;
+    std::wstring importsSelectedDll;
 };
 
 static UINT GetBestWindowDpi(HWND hwnd);
@@ -313,14 +318,23 @@ static void PopulateExports(HWND list, const PEParser& parser) {
     }
 }
 
-static void PopulateImports(HWND list, const std::vector<GuiState::ImportRow>& rows) {
+static void PopulateImportDlls(HWND list, const std::vector<std::pair<std::wstring, int>>& rows) {
     ListView_DeleteAllItems(list);
 
     for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
         const auto& r = rows[static_cast<size_t>(i)];
+        SetListViewText(list, i, 0, r.first);
+        SetListViewText(list, i, 1, std::to_wstring(r.second));
+    }
+}
+
+static void PopulateImportFunctions(HWND list, const std::vector<const GuiState::ImportRow*>& rows) {
+    ListView_DeleteAllItems(list);
+
+    for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
+        const auto& r = *rows[static_cast<size_t>(i)];
         SetListViewText(list, i, 0, r.type);
-        SetListViewText(list, i, 1, r.dll);
-        SetListViewText(list, i, 2, r.function);
+        SetListViewText(list, i, 1, r.function);
     }
 }
 
@@ -353,13 +367,8 @@ static void ApplyImportsFilterNow(GuiState* s) {
     std::wstring q = GetControlText(s->importsFilterEdit);
     std::wstring qLower = ToLowerString(q);
     std::vector<std::wstring> tokens = TokenizeQueryLower(qLower);
-    if (tokens.empty()) {
-        PopulateImports(s->pageImports, s->importsAllRows);
-        return;
-    }
-
-    std::vector<GuiState::ImportRow> filtered;
-    filtered.reserve(s->importsAllRows.size());
+    std::vector<const GuiState::ImportRow*> matched;
+    matched.reserve(s->importsAllRows.size());
     for (const auto& r : s->importsAllRows) {
         bool ok = true;
         for (const auto& t : tokens) {
@@ -369,10 +378,96 @@ static void ApplyImportsFilterNow(GuiState* s) {
             }
         }
         if (ok) {
-            filtered.push_back(r);
+            matched.push_back(&r);
         }
     }
-    PopulateImports(s->pageImports, filtered);
+
+    std::map<std::wstring, int> dllCounts;
+    for (const auto* r : matched) {
+        ++dllCounts[r->dll];
+    }
+
+    std::vector<std::pair<std::wstring, int>> dllRows;
+    dllRows.reserve(dllCounts.size());
+    for (const auto& it : dllCounts) {
+        dllRows.push_back({it.first, it.second});
+    }
+    PopulateImportDlls(s->pageImportsDlls, dllRows);
+
+    if (dllRows.empty()) {
+        s->importsSelectedDll.clear();
+        PopulateImportFunctions(s->pageImports, {});
+        return;
+    }
+
+    if (dllCounts.find(s->importsSelectedDll) == dllCounts.end()) {
+        s->importsSelectedDll = dllRows[0].first;
+    }
+
+    int selectIndex = 0;
+    for (int i = 0; i < static_cast<int>(dllRows.size()); ++i) {
+        if (dllRows[static_cast<size_t>(i)].first == s->importsSelectedDll) {
+            selectIndex = i;
+            break;
+        }
+    }
+
+    s->importsSyncingSelection = true;
+    ListView_SetItemState(s->pageImportsDlls, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+    ListView_SetItemState(s->pageImportsDlls, selectIndex, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    ListView_EnsureVisible(s->pageImportsDlls, selectIndex, FALSE);
+    s->importsSyncingSelection = false;
+
+    std::vector<const GuiState::ImportRow*> funcs;
+    funcs.reserve(static_cast<size_t>(dllRows[static_cast<size_t>(selectIndex)].second));
+    for (const auto* r : matched) {
+        if (r->dll == s->importsSelectedDll) {
+            funcs.push_back(r);
+        }
+    }
+    std::sort(funcs.begin(), funcs.end(), [](const GuiState::ImportRow* a, const GuiState::ImportRow* b) {
+        if (a->type != b->type) return a->type < b->type;
+        return a->function < b->function;
+    });
+    PopulateImportFunctions(s->pageImports, funcs);
+}
+
+static void UpdateImportFunctionsForSelection(GuiState* s) {
+    if (!s->importsFilterEdit) {
+        return;
+    }
+    if (s->importsSelectedDll.empty()) {
+        PopulateImportFunctions(s->pageImports, {});
+        return;
+    }
+
+    std::wstring q = GetControlText(s->importsFilterEdit);
+    std::wstring qLower = ToLowerString(q);
+    std::vector<std::wstring> tokens = TokenizeQueryLower(qLower);
+
+    std::vector<const GuiState::ImportRow*> funcs;
+    funcs.reserve(s->importsAllRows.size());
+    for (const auto& r : s->importsAllRows) {
+        if (r.dll != s->importsSelectedDll) {
+            continue;
+        }
+        bool ok = true;
+        for (const auto& t : tokens) {
+            if (r.haystackLower.find(t) == std::wstring::npos) {
+                ok = false;
+                break;
+            }
+        }
+        if (ok) {
+            funcs.push_back(&r);
+        }
+    }
+
+    std::sort(funcs.begin(), funcs.end(), [](const GuiState::ImportRow* a, const GuiState::ImportRow* b) {
+        if (a->type != b->type) return a->type < b->type;
+        return a->function < b->function;
+    });
+    PopulateImportFunctions(s->pageImports, funcs);
 }
 
 static void PopulatePdb(HWND edit, const std::optional<PEPdbInfo>& pdb) {
@@ -675,6 +770,7 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
         ShowWindow(pages[i], (i == static_cast<int>(idx)) ? SW_SHOW : SW_HIDE);
     }
     bool showImportsFilter = (idx == TabIndex::Imports);
+    ShowWindow(s->pageImportsDlls, showImportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->importsFilterLabel, showImportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->importsFilterEdit, showImportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->importsClearBtn, showImportsFilter ? SW_SHOW : SW_HIDE);
@@ -697,6 +793,7 @@ static void RefreshAllViews(GuiState* s) {
     if (s->analysis == nullptr) {
         SetWindowTextWString(s->pageSummary, L"\u62d6\u62fd EXE/DLL/SYS \u5230\u7a97\u53e3\uff0c\u6216\u70b9\u51fb\u201c\u6253\u5f00\u201d");
         ListView_DeleteAllItems(s->pageSections);
+        ListView_DeleteAllItems(s->pageImportsDlls);
         ListView_DeleteAllItems(s->pageImports);
         ListView_DeleteAllItems(s->pageExports);
         s->importsAllRows.clear();
@@ -1002,7 +1099,20 @@ static void UpdateLayout(GuiState* s) {
     MoveWindow(s->importsFilterLabel, filterX, filterY, filterLabelW, filterH, TRUE);
     MoveWindow(s->importsFilterEdit, filterEditX, filterY, filterEditW, filterH, TRUE);
     MoveWindow(s->importsClearBtn, filterEditX + filterEditW + filterGap, filterY, filterBtnW, filterH, TRUE);
-    MoveWindow(s->pageImports, pageRc.left, pageRc.top + filterH + pad, pageW, pageH - filterH - pad, TRUE);
+    int importsY = pageRc.top + filterH + pad;
+    int importsH = pageH - filterH - pad;
+    int splitGap = pad;
+    int minLeftW = MulDiv(220, static_cast<int>(s->dpi), 96);
+    int minRightW = MulDiv(240, static_cast<int>(s->dpi), 96);
+    int leftW = pageW / 3;
+    if (leftW < minLeftW) leftW = minLeftW;
+    if (leftW > pageW - splitGap - minRightW) leftW = pageW - splitGap - minRightW;
+    if (leftW < MulDiv(120, static_cast<int>(s->dpi), 96)) leftW = MulDiv(120, static_cast<int>(s->dpi), 96);
+    int rightW = pageW - leftW - splitGap;
+    if (rightW < MulDiv(80, static_cast<int>(s->dpi), 96)) rightW = MulDiv(80, static_cast<int>(s->dpi), 96);
+
+    MoveWindow(s->pageImportsDlls, pageRc.left, importsY, leftW, importsH, TRUE);
+    MoveWindow(s->pageImports, pageRc.left + leftW + splitGap, importsY, rightW, importsH, TRUE);
     MoveWindow(s->pageExports, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pagePdb, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pageSignature, pageRc.left, pageRc.top, pageW, pageH, TRUE);
@@ -1064,6 +1174,7 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->tab,
         s->pageSummary,
         s->pageSections,
+        s->pageImportsDlls,
         s->pageImports,
         s->pageExports,
         s->pagePdb,
@@ -1081,6 +1192,7 @@ static void ApplyUiFontAndTheme(GuiState* s) {
 
     SetWindowTheme(s->tab, L"Explorer", nullptr);
     SetWindowTheme(s->pageSections, L"Explorer", nullptr);
+    SetWindowTheme(s->pageImportsDlls, L"Explorer", nullptr);
     SetWindowTheme(s->pageImports, L"Explorer", nullptr);
     SetWindowTheme(s->pageExports, L"Explorer", nullptr);
 
@@ -1092,6 +1204,7 @@ static void ApplyUiFontAndTheme(GuiState* s) {
 
     DWORD ex = LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP;
     ListView_SetExtendedListViewStyleEx(s->pageSections, ex, ex);
+    ListView_SetExtendedListViewStyleEx(s->pageImportsDlls, ex, ex);
     ListView_SetExtendedListViewStyleEx(s->pageImports, ex, ex);
     ListView_SetExtendedListViewStyleEx(s->pageExports, ex, ex);
 }
@@ -1162,6 +1275,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             DWORD listStyle = WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS;
             s->pageSections = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SECTIONS), nullptr, nullptr);
+            s->pageImportsDlls = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS_DLLS), nullptr, nullptr);
             s->pageImports = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS), nullptr, nullptr);
             s->pageExports = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS), nullptr, nullptr);
 
@@ -1179,9 +1293,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             AddListViewColumn(s->pageSections, 4, colW(120), L"RawSize");
             AddListViewColumn(s->pageSections, 5, colW(140), L"Chars");
 
+            AddListViewColumn(s->pageImportsDlls, 0, colW(320), L"DLL");
+            AddListViewColumn(s->pageImportsDlls, 1, colW(90), L"Count");
+
             AddListViewColumn(s->pageImports, 0, colW(92), L"Type");
-            AddListViewColumn(s->pageImports, 1, colW(260), L"DLL");
-            AddListViewColumn(s->pageImports, 2, colW(340), L"Function");
+            AddListViewColumn(s->pageImports, 1, colW(520), L"Function");
 
             AddListViewColumn(s->pageExports, 0, colW(100), L"Ordinal");
             AddListViewColumn(s->pageExports, 1, colW(120), L"RVA");
@@ -1289,6 +1405,19 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     StartVerifyIfNeeded(s, false);
                 }
                 return 0;
+            }
+            if (nm->hwndFrom == s->pageImportsDlls && nm->code == LVN_ITEMCHANGED) {
+                if (s->importsSyncingSelection) {
+                    return 0;
+                }
+                auto* nmlv = reinterpret_cast<NMLISTVIEW*>(lParam);
+                if (nmlv->iItem >= 0 && (nmlv->uNewState & LVIS_SELECTED) && !(nmlv->uOldState & LVIS_SELECTED)) {
+                    wchar_t buf[1024] = {};
+                    ListView_GetItemText(s->pageImportsDlls, nmlv->iItem, 0, buf, static_cast<int>(std::size(buf)));
+                    s->importsSelectedDll = buf;
+                    UpdateImportFunctionsForSelection(s);
+                    return 0;
+                }
             }
             break;
         }
