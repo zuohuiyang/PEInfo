@@ -118,6 +118,60 @@ struct GuiState {
 static UINT GetBestWindowDpi(HWND hwnd);
 static HFONT CreateUiFontForDpi(UINT dpi);
 
+static void CenterWindowOnWorkArea(HWND hwnd) {
+    if (!hwnd) {
+        return;
+    }
+
+    RECT wndRc = {};
+    if (!GetWindowRect(hwnd, &wndRc)) {
+        return;
+    }
+    LONG w = wndRc.right - wndRc.left;
+    LONG h = wndRc.bottom - wndRc.top;
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+
+    POINT pt = {};
+    GetCursorPos(&pt);
+    HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
+    if (!GetMonitorInfoW(mon, &mi)) {
+        return;
+    }
+
+    LONG x = mi.rcWork.left + ((mi.rcWork.right - mi.rcWork.left) - w) / 2;
+    LONG y = mi.rcWork.top + ((mi.rcWork.bottom - mi.rcWork.top) - h) / 2;
+
+    LONG minX = mi.rcWork.left;
+    LONG maxX = mi.rcWork.right - w;
+    if (maxX < minX) {
+        maxX = minX;
+    }
+    if (x < minX) {
+        x = minX;
+    }
+    if (x > maxX) {
+        x = maxX;
+    }
+
+    LONG minY = mi.rcWork.top;
+    LONG maxY = mi.rcWork.bottom - h;
+    if (maxY < minY) {
+        maxY = minY;
+    }
+    if (y < minY) {
+        y = minY;
+    }
+    if (y > maxY) {
+        y = maxY;
+    }
+
+    SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 static void SetWindowTextWString(HWND hwnd, const std::wstring& s) {
     SetWindowTextW(hwnd, s.c_str());
 }
@@ -1422,6 +1476,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
         return 1;
     }
     state.hwnd = hwnd;
+
+    if (nCmdShow != SW_SHOWMAXIMIZED && nCmdShow != SW_MAXIMIZE && nCmdShow != SW_MINIMIZE && nCmdShow != SW_SHOWMINIMIZED && nCmdShow != SW_FORCEMINIMIZE) {
+        CenterWindowOnWorkArea(hwnd);
+    }
 
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
