@@ -8,9 +8,8 @@
 
 ## 项目结构与目标
 - 解决方案：`PEInfo.sln`
-- 主程序：`PEInfo.exe`（Win32/x86，支持 x64 构建）
+- 主程序：`PEInfo.exe`（命令行工具，Win32 / x64 构建）
 - 测试工程：`test_build\PEAnalyzerTest.vcxproj`（控制台测试）
-- 资源与设计图：`docs/images/`（已保留当前方案图：`ui_vtabs_*`）
 
 ## 构建与打包
 - 构建脚本：`build.bat`
@@ -19,18 +18,16 @@
 - 打包产物：`dist\PEInfo_x86_Release.zip`、`dist\PEInfo_x64_Release.zip`
 
 ## 运行与验证
-- 启动应用：`./Release/PEInfo.exe`
+- 启动 CLI：`./Release/PEInfo.exe --help`
+- 示例：`./Release/PEInfo.exe C:\Windows\System32\notepad.exe --all`
 - 测试执行：`./test_build/Release/PEAnalyzerTest.exe`
   - 覆盖：PE 解析基础、文本与文件哈希、导入解析健壮性
-- 截图采集（用于界面确认）：
-  - 在应用界面按 `F12`，生成 BMP 截图到 `artifacts/`：
-    - `ui_main.bmp`、`ui_pe.bmp`、`ui_imports.bmp`、`ui_hash.bmp`
 
-## 当前界面与功能
-- 布局：顶部 Path 工具栏；左侧导航（`PE Info/Imports/Hash`）；右侧卡片内容区
-- PE Info：`Entry Point(RVA/RAW)`、`EP Section`、`First Bytes`、`Linker Info.`、`SubSystem`、`MD5/Notice`
-- Imports：搜索栏 + 双列表框（左：DLLs；右：APIs），支持关键字过滤与联动
-- Hash：多算法勾选（`MD5/SHA1/SHA256`），支持文本或文件批量计算，结果逐行输出
+## 当前功能（CLI）
+- 输出：`--format text|json`，可用 `--out <path>` 写 UTF-8 文件
+- 分析项：`--summary/--sections/--imports/--imports-all/--exports/--pdb/--sig/--verify`
+- 校验：`--verify` 会用退出码反映签名验证结果（通过/失败/未签名）
+- 哈希：`--hash md5|sha1|sha256`
 
 ## 开发注意事项
 - 编码：UTF-8；界面文本中文；Win32 原生控件
@@ -39,5 +36,4 @@
 
 ## 后续扩展建议
 - 算法扩展：`CRC32/RIPEMD160` 等
-- 导入表增强：API 搜索高亮、分页加载
 - 64位 PE 解析：引入 `IMAGE_NT_HEADERS64` 与对应字段映射

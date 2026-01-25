@@ -2,33 +2,27 @@
 
 ## 项目概述
 
-PEInfo 是一个 Windows C++ 工具，提供 PE 文件信息查看（含导入/导出/延迟加载、PDB 信息、时间戳可读化、数字签名检测/验证）与文件哈希计算能力。项目采用模块化架构，核心解析与哈希逻辑可复用，符合 C++17 标准。
+PEInfo 是一个 Windows C++ 命令行工具（CLI），用于分析单个 PE 文件并输出结构化报告：导入/导出（含 Delay-Import）、PDB（RSDS）、时间戳展示、数字签名检测/验证，以及文件哈希（MD5/SHA1/SHA256）。核心解析与哈希逻辑模块化，可复用，符合 C++17 标准。
 
 ## 🎯 核心功能
 
-### 1. PE文件分析器
-- ✅ **文件加载**：支持拖放操作和文件选择对话框
-- ✅ **PE结构解析**：完整解析DOS头、PE头、导入表
-- ✅ **树形显示**：使用树形控件清晰展示PE结构
-- ✅ **详细信息**：显示DLL名称、函数名、序号、RVA
+### 1. PE 文件分析（CLI）
+- ✅ **概要信息**：位数/Machine/Sections/SizeOfImage/EntryPointRVA/ImageBase/Subsystem
+- ✅ **Sections**：节表摘要
+- ✅ **Imports / Delay-Imports**：按 DLL 汇总并列出 API（支持截断/不截断）
+- ✅ **Exports**：导出函数列表
 - ✅ **PDB 信息**：解析 Debug Directory（RSDS GUID + Age + PDB Path）
-- ✅ **时间戳可读化**：TimeDateStamp 支持 raw/utc/local 三种展示
-- ✅ **数字签名**：可识别并验证嵌入式签名/编录(Catalog)签名，打印签名者与指纹等信息
-- ✅ **Unicode支持**：支持Unicode文件路径
-
-### 2. 哈希计算器  
-- ✅ **多种算法**：支持MD5、SHA1、SHA256（使用Windows CryptoAPI）
-- ✅ **输入模式**：支持文本输入和文件选择
-- ✅ **性能优化**：显示计算时间和性能指标
-- ✅ **操作控制**：提供计算和清除按钮
-- ✅ **大文件支持**：分块处理大文件
+- ✅ **时间戳展示**：TimeDateStamp 支持 raw/utc/local 三种展示
+- ✅ **数字签名**：检测 embedded / catalog 签名并可验证（`--verify`），输出 signer/thumbprint 等信息
+- ✅ **文件哈希**：MD5/SHA1/SHA256（Windows CryptoAPI），支持显示耗时
+- ✅ **输出格式**：text/json，支持 `--out` 写文件（UTF-8）
 
 ## 🛠 技术规格
 
 ### 编译要求
 - **编译器**：Visual Studio 2019/2022
 - **C++标准**：C++17
-- **目标平台**：32位 (x86)
+- **目标平台**：Win32 / x64
 - **运行时链接**：静态链接 (/MT)
 - **Windows版本**：Windows 7及以上
 
@@ -43,9 +37,7 @@ petools/
 ├── PEDebugInfo.h/cpp       # Debug Directory / PDB 解析
 ├── PESignature.h/cpp       # 数字签名检测/验证（embedded/catalog）
 ├── HashCalculator.h/cpp    # 哈希计算模块  
-├── PEAnalyzer.h/cpp        # 主GUI应用程序
 ├── stdafx.h/cpp            # 预编译头文件
-├── PEAnalyzer.rc           # 资源文件
 ├── build.bat               # 编译脚本
 └── test_simple.cpp         # 核心功能测试程序（由 test_build 工程构建运行）
 ```
@@ -84,6 +76,8 @@ petools/
 
 ### 退出码（与 --verify 相关）
 - `0`：成功（解析成功；若指定 `--verify` 则验证也成功）
+- `1`：运行错误（例如文件读取/解析/哈希/写入失败）
+- `2`：参数/用法错误
 - `3`：签名验证失败
 - `4`：未签名
 
@@ -122,21 +116,17 @@ petools/
 
 ## 📚 相关文档
 
-- [编译指南](COMPILATION_GUIDE.md) - 详细的编译步骤和故障排除
-- [功能总结](FEATURES_SUMMARY.md) - 完整的技术规格和实现细节
-- [项目文件说明](PROJECT_FILES.md) - 各文件功能说明
+- [工程设计总结](ENGINEERING_SUMMARY.md) - 本地开发与编译/验证要点
 
 ## 🎯 开发状态
 
 ✅ **已完成**：
 - 核心PE解析模块
 - 哈希计算模块  
-- GUI框架和基本控件
 - 项目配置和编译脚本
 - 完整的文档和说明
 
 ⚠️ **待测试**：
-- 完整GUI功能验证
 - 实际PE文件测试
 - 性能基准测试
 - 兼容性验证

@@ -210,8 +210,8 @@ static void TestSignatureCatalog() {
 
 static void TestNotSignedFile() {
     std::wcout << L"\n[CASE] Not-signed file verify\n";
-    std::wstring file = L"C:\\project\\petools\\icon.svg";
-    ExpectTrue(FileExists(file), __LINE__, L"icon.svg exists");
+    std::wstring file = L"C:\\project\\petools\\README.md";
+    ExpectTrue(FileExists(file), __LINE__, L"README.md exists");
     auto vr = VerifyEmbeddedSignature(file);
     ExpectTrue(vr.status == PESignatureVerifyStatus::NotSigned || vr.status == PESignatureVerifyStatus::Error, __LINE__, L"non-PE should not be signed");
 }
