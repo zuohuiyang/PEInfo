@@ -10,6 +10,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <uxtheme.h>
 #include <process.h>
 
@@ -26,6 +27,7 @@ static const wchar_t* kMainClassName = L"PEInfoGuiMainWindow";
 static const UINT WM_APP_ANALYSIS_DONE = WM_APP + 1;
 static const UINT WM_APP_VERIFY_DONE = WM_APP + 2;
 static const UINT_PTR kTimerImportsFilter = 1;
+static const WPARAM IDM_SYS_SETTINGS = 0x1FF0;
 
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 DECLARE_HANDLE(DPI_AWARENESS_CONTEXT);
@@ -33,12 +35,9 @@ DECLARE_HANDLE(DPI_AWARENESS_CONTEXT);
 #endif
 
 enum : UINT {
-    IDC_BTN_OPEN = 1001,
-    IDC_BTN_REFRESH = 1002,
-    IDC_BTN_EXPORT_JSON = 1003,
-    IDC_BTN_EXPORT_TEXT = 1004,
-    IDC_BTN_COPY_SUMMARY = 1005,
-    IDC_BTN_SETTINGS = 1006,
+    IDC_BTN_OPEN_SMALL = 1001,
+    IDC_BTN_SETTINGS_GEAR = 1002,
+    IDC_BTN_OPEN_BIG = 1003,
     IDC_TAB = 1010,
     IDC_FILEINFO = 1020,
     IDC_SUMMARY = 2001,
@@ -81,12 +80,9 @@ struct AnalysisResultMessage {
 
 struct GuiState {
     HWND hwnd = nullptr;
-    HWND btnOpen = nullptr;
-    HWND btnRefresh = nullptr;
-    HWND btnExportJson = nullptr;
-    HWND btnExportText = nullptr;
-    HWND btnCopySummary = nullptr;
-    HWND btnSettings = nullptr;
+    HWND btnOpenSmall = nullptr;
+    HWND btnSettingsGear = nullptr;
+    HWND btnOpenBig = nullptr;
     HWND fileInfo = nullptr;
     HWND tab = nullptr;
 
@@ -112,7 +108,10 @@ struct GuiState {
     std::unique_ptr<PEAnalysisResult> analysis;
 
     HFONT uiFont = nullptr;
+    HFONT iconFont = nullptr;
     UINT dpi = 96;
+
+    HICON iconOpen = nullptr;
 
     struct ImportRow {
         std::wstring type;
@@ -222,25 +221,6 @@ static std::vector<std::wstring> TokenizeQueryLower(const std::wstring& qLower) 
         }
     }
     return tokens;
-}
-
-static bool CopyToClipboard(HWND hwnd, const std::wstring& text) {
-    if (!OpenClipboard(hwnd)) {
-        return false;
-    }
-    EmptyClipboard();
-    size_t bytes = (text.size() + 1) * sizeof(wchar_t);
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
-    if (!mem) {
-        CloseClipboard();
-        return false;
-    }
-    void* dst = GlobalLock(mem);
-    memcpy(dst, text.c_str(), bytes);
-    GlobalUnlock(mem);
-    SetClipboardData(CF_UNICODETEXT, mem);
-    CloseClipboard();
-    return true;
 }
 
 static std::wstring SigPresenceToText(const PESignaturePresence& p) {
@@ -667,12 +647,9 @@ static void PopulateHash(HWND edit, const std::vector<HashResult>& hashes) {
 
 static void SetBusy(GuiState* s, bool busy) {
     s->busy = busy;
-    EnableWindow(s->btnOpen, !busy);
-    EnableWindow(s->btnRefresh, !busy && !s->currentFile.empty());
-    EnableWindow(s->btnExportJson, !busy && s->analysis != nullptr);
-    EnableWindow(s->btnExportText, !busy && s->analysis != nullptr);
-    EnableWindow(s->btnCopySummary, !busy && s->analysis != nullptr);
-    EnableWindow(s->btnSettings, !busy);
+    EnableWindow(s->btnOpenSmall, !busy);
+    EnableWindow(s->btnOpenBig, !busy);
+    EnableWindow(s->btnSettingsGear, !busy);
 }
 
 static std::wstring GetSelfExePath() {
@@ -907,7 +884,7 @@ static void UpdateFileInfo(GuiState* s) {
 
 static void RefreshAllViews(GuiState* s) {
     if (s->analysis == nullptr) {
-        std::wstring hint = L"\u62d6\u62fd EXE/DLL/SYS \u5230\u7a97\u53e3\uff0c\u6216\u70b9\u51fb\u201c\u6253\u5f00\u201d";
+        std::wstring hint = L"\u62d6\u62fd EXE/DLL/SYS \u5230\u7a97\u53e3\uff0c\u6216\u70b9\u51fb\u201c\u9009\u62e9\u6587\u4ef6...\u201d";
         SetWindowTextWString(s->pageSummary, hint);
         ListView_DeleteAllItems(s->pageSections);
         ListView_DeleteAllItems(s->pageImportsDlls);
@@ -919,6 +896,7 @@ static void RefreshAllViews(GuiState* s) {
         SetWindowTextWString(s->pageSignature, L"");
         SetWindowTextWString(s->pageHash, L"");
         UpdateFileInfo(s);
+        ShowWindow(s->btnOpenBig, SW_SHOW);
         return;
     }
 
@@ -932,6 +910,7 @@ static void RefreshAllViews(GuiState* s) {
     PopulateSignature(s->pageSignature, *s->analysis, IsVerifyInFlightForCurrent(s));
     PopulateHash(s->pageHash, s->analysis->hashes);
     UpdateFileInfo(s);
+    ShowWindow(s->btnOpenBig, SW_HIDE);
 }
 
 static unsigned __stdcall AnalysisThreadProc(void* param) {
@@ -1068,107 +1047,6 @@ static std::wstring PromptOpenFile(HWND hwnd) {
     return fileName;
 }
 
-static std::wstring PromptSaveFile(HWND hwnd, const wchar_t* title, const wchar_t* defExt, const wchar_t* filter) {
-    wchar_t fileName[MAX_PATH] = {};
-    OPENFILENAMEW ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = hwnd;
-    ofn.lpstrFile = fileName;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrTitle = title;
-    ofn.lpstrDefExt = defExt;
-    ofn.lpstrFilter = filter;
-    ofn.nFilterIndex = 1;
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-    if (!GetSaveFileNameW(&ofn)) {
-        return {};
-    }
-    return fileName;
-}
-
-static void ExportJson(GuiState* s) {
-    if (s->analysis == nullptr) {
-        return;
-    }
-    std::wstring path = PromptSaveFile(s->hwnd, L"\u5bfc\u51fa JSON", L"json", L"JSON (*.json)\0*.json\0All Files (*.*)\0*.*\0");
-    if (path.empty()) {
-        return;
-    }
-
-    ReportOptions ro;
-    ro.showSummary = true;
-    ro.showSections = true;
-    ro.showImports = true;
-    ro.showExports = true;
-    ro.showResources = true;
-    ro.resourcesAll = true;
-    ro.showPdb = true;
-    ro.showSignature = true;
-    ro.importsAll = true;
-    ro.timeFormat = ReportTimeFormat::Local;
-
-    std::string json = BuildJsonReport(ro,
-                                       s->analysis->filePath,
-                                       s->analysis->parser,
-                                       s->analysis->pdb,
-                                       s->analysis->signaturePresenceReady ? &s->analysis->signaturePresence : nullptr,
-                                       &s->analysis->embeddedVerify,
-                                       &s->analysis->catalogVerify,
-                                       s->analysis->reportHash.has_value() ? &s->analysis->reportHash : nullptr);
-    json.push_back('\n');
-    if (!WriteAllBytes(path, json)) {
-        MessageBoxError(s->hwnd, L"\u5199\u5165\u6587\u4ef6\u5931\u8d25");
-    }
-}
-
-static void ExportText(GuiState* s) {
-    if (s->analysis == nullptr) {
-        return;
-    }
-    std::wstring path = PromptSaveFile(s->hwnd, L"\u5bfc\u51fa Text", L"txt", L"Text (*.txt)\0*.txt\0All Files (*.*)\0*.*\0");
-    if (path.empty()) {
-        return;
-    }
-
-    ReportOptions ro;
-    ro.showSummary = true;
-    ro.showSections = true;
-    ro.showImports = true;
-    ro.showExports = true;
-    ro.showResources = true;
-    ro.resourcesAll = true;
-    ro.showPdb = true;
-    ro.showSignature = true;
-    ro.importsAll = true;
-    ro.quiet = false;
-    ro.timeFormat = ReportTimeFormat::Local;
-
-    std::wstring text = BuildTextReport(ro,
-                                        s->analysis->filePath,
-                                        s->analysis->parser,
-                                        s->analysis->pdb,
-                                        s->analysis->signaturePresenceReady ? &s->analysis->signaturePresence : nullptr,
-                                        s->analysis->embeddedVerify,
-                                        s->analysis->catalogVerify,
-                                        s->analysis->reportHash,
-                                        0,
-                                        500);
-    std::string utf8 = WStringToUtf8(text);
-    if (!WriteAllBytes(path, utf8)) {
-        MessageBoxError(s->hwnd, L"\u5199\u5165\u6587\u4ef6\u5931\u8d25");
-    }
-}
-
-static void CopySummary(GuiState* s) {
-    if (s->analysis == nullptr) {
-        return;
-    }
-    std::wstring text = GetControlText(s->pageSummary);
-    if (!CopyToClipboard(s->hwnd, text)) {
-        MessageBoxError(s->hwnd, L"\u590d\u5236\u5931\u8d25");
-    }
-}
-
 static void UpdateLayout(GuiState* s) {
     RECT rc = {};
     GetClientRect(s->hwnd, &rc);
@@ -1176,27 +1054,21 @@ static void UpdateLayout(GuiState* s) {
     int h = rc.bottom - rc.top;
 
     int pad = MulDiv(10, static_cast<int>(s->dpi), 96);
-    int btnH = MulDiv(32, static_cast<int>(s->dpi), 96);
-    int row1Y = pad;
-    int x = pad;
-    int btnW = MulDiv(104, static_cast<int>(s->dpi), 96);
-
-    MoveWindow(s->btnOpen, x, row1Y, btnW, btnH, TRUE);
-    x += btnW + pad;
-    MoveWindow(s->btnRefresh, x, row1Y, btnW, btnH, TRUE);
-    x += btnW + pad;
-    int wideBtnW = MulDiv(126, static_cast<int>(s->dpi), 96);
-    MoveWindow(s->btnExportJson, x, row1Y, wideBtnW, btnH, TRUE);
-    x += wideBtnW + pad;
-    MoveWindow(s->btnExportText, x, row1Y, wideBtnW, btnH, TRUE);
-    x += wideBtnW + pad;
-    MoveWindow(s->btnCopySummary, x, row1Y, wideBtnW, btnH, TRUE);
-    x += wideBtnW + pad;
-    MoveWindow(s->btnSettings, x, row1Y, btnW, btnH, TRUE);
-
-    int fileInfoY = row1Y + btnH + pad;
+    int iconBtn = MulDiv(32, static_cast<int>(s->dpi), 96);
+    int fileInfoY = pad;
     int fileInfoH = MulDiv(24, static_cast<int>(s->dpi), 96);
-    MoveWindow(s->fileInfo, pad, fileInfoY, w - 2 * pad, fileInfoH, TRUE);
+    int btnGap = MulDiv(6, static_cast<int>(s->dpi), 96);
+    int btnY = fileInfoY - MulDiv(4, static_cast<int>(s->dpi), 96);
+    int gearX = w - pad - iconBtn;
+    int openSmallX = gearX - btnGap - iconBtn;
+    MoveWindow(s->btnOpenSmall, openSmallX, btnY, iconBtn, iconBtn, TRUE);
+    MoveWindow(s->btnSettingsGear, gearX, btnY, iconBtn, iconBtn, TRUE);
+
+    int fileInfoW = w - 2 * pad - (2 * iconBtn + btnGap) - pad;
+    if (fileInfoW < MulDiv(120, static_cast<int>(s->dpi), 96)) {
+        fileInfoW = MulDiv(120, static_cast<int>(s->dpi), 96);
+    }
+    MoveWindow(s->fileInfo, pad, fileInfoY, fileInfoW, fileInfoH, TRUE);
 
     int tabY = fileInfoY + fileInfoH + pad;
     int tabH = h - tabY - pad;
@@ -1243,6 +1115,12 @@ static void UpdateLayout(GuiState* s) {
     MoveWindow(s->pageSignature, pageRc.left, pageRc.top, pageW, pageH, TRUE);
 
     MoveWindow(s->pageHash, pageRc.left, pageRc.top, pageW, pageH, TRUE);
+
+    int bigBtnW = MulDiv(300, static_cast<int>(s->dpi), 96);
+    int bigBtnH = MulDiv(56, static_cast<int>(s->dpi), 96);
+    int bigX = pageRc.left + (pageW - bigBtnW) / 2;
+    int bigY = pageRc.top + (pageH - bigBtnH) / 2;
+    MoveWindow(s->btnOpenBig, bigX, bigY, bigBtnW, bigBtnH, TRUE);
 }
 
 static UINT GetBestWindowDpi(HWND hwnd) {
@@ -1283,18 +1161,33 @@ static HFONT CreateUiFontForDpi(UINT dpi) {
     return reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
 }
 
+static HFONT CreateIconFontForDpi(UINT dpi) {
+    int px = MulDiv(18, static_cast<int>(dpi), 96);
+    return CreateFontW(-px,
+                       0,
+                       0,
+                       0,
+                       FW_NORMAL,
+                       FALSE,
+                       FALSE,
+                       FALSE,
+                       DEFAULT_CHARSET,
+                       OUT_DEFAULT_PRECIS,
+                       CLIP_DEFAULT_PRECIS,
+                       CLEARTYPE_QUALITY,
+                       DEFAULT_PITCH | FF_DONTCARE,
+                       L"Segoe MDL2 Assets");
+}
+
 static void ApplyUiFontAndTheme(GuiState* s) {
     if (!s->uiFont) {
         return;
     }
 
     HWND controls[] = {
-        s->btnOpen,
-        s->btnRefresh,
-        s->btnExportJson,
-        s->btnExportText,
-        s->btnCopySummary,
-        s->btnSettings,
+        s->btnOpenSmall,
+        s->btnSettingsGear,
+        s->btnOpenBig,
         s->fileInfo,
         s->tab,
         s->pageSummary,
@@ -1314,6 +1207,9 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         if (hwnd) {
             SendMessageW(hwnd, WM_SETFONT, reinterpret_cast<WPARAM>(s->uiFont), TRUE);
         }
+    }
+    if (s->btnSettingsGear && s->iconFont) {
+        SendMessageW(s->btnSettingsGear, WM_SETFONT, reinterpret_cast<WPARAM>(s->iconFont), TRUE);
     }
 
     SetWindowTheme(s->tab, L"Explorer", nullptr);
@@ -1355,13 +1251,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->hwnd = hwnd;
             s->dpi = GetBestWindowDpi(hwnd);
             s->uiFont = CreateUiFontForDpi(s->dpi);
+            s->iconFont = CreateIconFontForDpi(s->dpi);
 
-            s->btnOpen = CreateWindowW(L"BUTTON", L"\u6253\u5f00", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_OPEN), nullptr, nullptr);
-            s->btnRefresh = CreateWindowW(L"BUTTON", L"\u5237\u65b0", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_REFRESH), nullptr, nullptr);
-            s->btnExportJson = CreateWindowW(L"BUTTON", L"\u5bfc\u51fa JSON", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_EXPORT_JSON), nullptr, nullptr);
-            s->btnExportText = CreateWindowW(L"BUTTON", L"\u5bfc\u51fa Text", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_EXPORT_TEXT), nullptr, nullptr);
-            s->btnCopySummary = CreateWindowW(L"BUTTON", L"\u590d\u5236\u6458\u8981", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_COPY_SUMMARY), nullptr, nullptr);
-            s->btnSettings = CreateWindowW(L"BUTTON", L"\u8bbe\u7f6e", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_SETTINGS), nullptr, nullptr);
+            s->btnSettingsGear = CreateWindowW(L"BUTTON", L"\xE713", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_SETTINGS_GEAR), nullptr, nullptr);
 
             s->fileInfo = CreateWindowW(L"STATIC",
                                         L"\u672a\u6253\u5f00\u6587\u4ef6",
@@ -1374,6 +1266,22 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                         reinterpret_cast<HMENU>(IDC_FILEINFO),
                                         nullptr,
                                         nullptr);
+
+            s->btnOpenSmall = CreateWindowW(L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_ICON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_OPEN_SMALL), nullptr, nullptr);
+            s->btnOpenBig = CreateWindowW(L"BUTTON", L"\u9009\u62e9\u6587\u4ef6...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_OPEN_BIG), nullptr, nullptr);
+
+            SHSTOCKICONINFO sii = {};
+            sii.cbSize = sizeof(sii);
+            if (SUCCEEDED(SHGetStockIconInfo(SIID_FOLDEROPEN, SHGSI_ICON | SHGSI_SMALLICON, &sii))) {
+                s->iconOpen = sii.hIcon;
+                SendMessageW(s->btnOpenSmall, BM_SETIMAGE, IMAGE_ICON, reinterpret_cast<LPARAM>(s->iconOpen));
+            }
+
+            HMENU sys = GetSystemMenu(hwnd, FALSE);
+            if (sys) {
+                AppendMenuW(sys, MF_SEPARATOR, 0, nullptr);
+                AppendMenuW(sys, MF_STRING, IDM_SYS_SETTINGS, L"\u8bbe\u7f6e...");
+            }
 
             s->tab = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_TAB), nullptr, nullptr);
 
@@ -1465,38 +1373,25 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 DeleteObject(s->uiFont);
             }
             s->uiFont = CreateUiFontForDpi(s->dpi);
+            if (s->iconFont) {
+                DeleteObject(s->iconFont);
+            }
+            s->iconFont = CreateIconFontForDpi(s->dpi);
             ApplyUiFontAndTheme(s);
             UpdateLayout(s);
             return 0;
         }
         case WM_COMMAND: {
             switch (LOWORD(wParam)) {
-                case IDC_BTN_OPEN: {
+                case IDC_BTN_OPEN_SMALL:
+                case IDC_BTN_OPEN_BIG: {
                     std::wstring path = PromptOpenFile(hwnd);
                     if (!path.empty()) {
                         StartAnalysis(s, path);
                     }
                     return 0;
                 }
-                case IDC_BTN_REFRESH: {
-                    if (!s->currentFile.empty()) {
-                        StartAnalysis(s, s->currentFile);
-                    }
-                    return 0;
-                }
-                case IDC_BTN_EXPORT_JSON: {
-                    ExportJson(s);
-                    return 0;
-                }
-                case IDC_BTN_EXPORT_TEXT: {
-                    ExportText(s);
-                    return 0;
-                }
-                case IDC_BTN_COPY_SUMMARY: {
-                    CopySummary(s);
-                    return 0;
-                }
-                case IDC_BTN_SETTINGS: {
+                case IDC_BTN_SETTINGS_GEAR: {
                     ShowSettingsDialog(hwnd);
                     return 0;
                 }
@@ -1514,6 +1409,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     ApplyImportsFilterNow(s);
                     return 0;
                 }
+            }
+            break;
+        }
+        case WM_SYSCOMMAND: {
+            if ((wParam & 0xFFF0) == IDM_SYS_SETTINGS) {
+                ShowSettingsDialog(hwnd);
+                return 0;
             }
             break;
         }
@@ -1599,6 +1501,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
         case WM_DESTROY: {
+            if (s->iconOpen) {
+                DestroyIcon(s->iconOpen);
+                s->iconOpen = nullptr;
+            }
+            if (s->iconFont) {
+                DeleteObject(s->iconFont);
+                s->iconFont = nullptr;
+            }
             if (s->uiFont) {
                 DeleteObject(s->uiFont);
                 s->uiFont = nullptr;
