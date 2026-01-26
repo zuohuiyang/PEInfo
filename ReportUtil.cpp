@@ -74,6 +74,17 @@ std::wstring HexU64(ULONGLONG v, int width) {
     return oss.str();
 }
 
+std::wstring CoffMachineToName(WORD machine) {
+    switch (machine) {
+        case IMAGE_FILE_MACHINE_I386: return L"I386";
+        case IMAGE_FILE_MACHINE_AMD64: return L"AMD64";
+        case IMAGE_FILE_MACHINE_ARM: return L"ARM";
+        case IMAGE_FILE_MACHINE_ARM64: return L"ARM64";
+        case IMAGE_FILE_MACHINE_IA64: return L"IA64";
+    }
+    return L"Unknown";
+}
+
 std::string WStringToUtf8(const std::wstring& w) {
     if (w.empty()) {
         return {};

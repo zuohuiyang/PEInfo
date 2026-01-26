@@ -21,8 +21,8 @@ std::wstring VerifyStatusToString(PESignatureVerifyStatus s) {
 
 static void PrintHeaderInfo(std::wostream& os, const PEHeaderInfo& h, const ReportOptions& opt) {
     os << L"PE Header:\n";
-    os << L"  Bitness: " << (h.is64Bit ? L"x64" : (h.is32Bit ? L"x86" : L"Unknown")) << L"\n";
-    os << L"  Machine: " << HexU32(h.machine, 4) << L"\n";
+    const wchar_t* bitness = h.is64Bit ? L"x64" : (h.is32Bit ? L"x86" : L"Unknown");
+    os << L"  Architecture: " << bitness << L" (" << CoffMachineToName(h.machine) << L", " << HexU32(h.machine, 4) << L")\n";
     os << L"  Sections: " << h.numberOfSections << L"\n";
     if (opt.timeFormat == ReportTimeFormat::Raw) {
         os << L"  TimeDateStamp: " << HexU32(h.timeDateStamp, 8) << L"\n";

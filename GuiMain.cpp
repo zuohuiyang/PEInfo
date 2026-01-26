@@ -238,8 +238,8 @@ static std::wstring FormatSummaryText(const PEAnalysisResult& ar) {
     const auto& h = ar.parser.GetHeaderInfo();
     std::wostringstream out;
     out << L"\u6587\u4ef6: " << ar.filePath << L"\r\n";
-    out << L"Bitness: " << (h.is64Bit ? L"x64" : (h.is32Bit ? L"x86" : L"Unknown")) << L"\r\n";
-    out << L"Machine: " << HexU32(h.machine, 4) << L"\r\n";
+    const wchar_t* bitness = h.is64Bit ? L"x64" : (h.is32Bit ? L"x86" : L"Unknown");
+    out << L"Architecture: " << bitness << L" (" << CoffMachineToName(h.machine) << L", " << HexU32(h.machine, 4) << L")\r\n";
     out << L"Sections: " << h.numberOfSections << L"\r\n";
     out << L"TimeDateStamp: " << HexU32(h.timeDateStamp, 8) << L" (" << FormatCoffTime(h.timeDateStamp, ReportTimeFormat::Local) << L")\r\n";
     out << L"SizeOfImage: " << HexU32(h.sizeOfImage, 8) << L"\r\n";

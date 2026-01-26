@@ -68,11 +68,15 @@ std::string BuildJsonReport(const ReportOptions& opt,
     if (opt.showSummary) {
         const auto& h = parser.GetHeaderInfo();
         oss << ",\"summary\":{";
-        oss << "\"bitness\":" << JsonQuoteUtf8(h.is64Bit ? "x64" : (h.is32Bit ? "x86" : "unknown"));
+        std::string bitness = h.is64Bit ? "x64" : (h.is32Bit ? "x86" : "unknown");
+        oss << "\"bitness\":" << JsonQuoteUtf8(bitness);
         {
             std::ostringstream t;
             t << "0x" << std::hex << std::setw(4) << std::setfill('0') << h.machine;
             oss << ",\"machine\":" << JsonQuoteUtf8(t.str());
+            std::string machineName = WStringToUtf8(CoffMachineToName(h.machine));
+            oss << ",\"machineName\":" << JsonQuoteUtf8(machineName);
+            oss << ",\"arch\":" << JsonQuoteUtf8(bitness + " (" + machineName + ", " + t.str() + ")");
         }
         oss << ",\"sections\":" << h.numberOfSections;
         {

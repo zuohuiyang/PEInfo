@@ -2,6 +2,7 @@
 
 #include "ReportTypes.h"
 
+#include <windows.h>
 #include <string>
 
 std::wstring ToWStringUtf8BestEffort(const std::string& s);
@@ -10,6 +11,8 @@ std::wstring FormatCoffTime(DWORD timeDateStamp, ReportTimeFormat mode);
 
 std::wstring HexU32(DWORD v, int width);
 std::wstring HexU64(ULONGLONG v, int width);
+
+std::wstring CoffMachineToName(WORD machine);
 
 bool WriteAllBytes(const std::wstring& path, const std::string& bytes);
 
