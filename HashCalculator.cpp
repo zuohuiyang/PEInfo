@@ -12,38 +12,28 @@ HashCalculator::HashCalculator() {
 HashCalculator::~HashCalculator() {
 }
 
-HashResult HashCalculator::CalculateFileHash(const std::wstring& filePath, HashAlgorithm algorithm) {
-    std::vector<BYTE> fileData = ReadFileData(filePath);
-    if (fileData.empty()) {
-        HashResult result;
-        result.success = false;
-        result.algorithm = GetAlgorithmName(algorithm);
-        result.errorMessage = L"Failed to read file";
-        return result;
-    }
+void HashCalculator::SetChunkSize(size_t bytes) {
+    m_chunkSize = bytes == 0 ? (1u << 20) : bytes;
+}
 
-    return PerformHash(fileData, algorithm);
+void HashCalculator::SetProgressCallback(std::function<void(uint64_t, uint64_t)> cb) {
+    m_progress = std::move(cb);
+}
+
+void HashCalculator::SetCancelFlag(std::atomic<bool>* flag) {
+    m_cancel = flag;
+}
+
+HashResult HashCalculator::CalculateFileHash(const std::wstring& filePath, HashAlgorithm algorithm) {
+    return HashFileStream(filePath, algorithm);
 }
 
 std::vector<HashResult> HashCalculator::CalculateFileHashes(const std::wstring& filePath, const std::vector<HashAlgorithm>& algorithms) {
-    std::vector<BYTE> fileData = ReadFileData(filePath);
     std::vector<HashResult> results;
-
-    if (fileData.empty()) {
-        for (const auto& alg : algorithms) {
-            HashResult result;
-            result.success = false;
-            result.algorithm = GetAlgorithmName(alg);
-            result.errorMessage = L"Failed to read file";
-            results.push_back(result);
-        }
-        return results;
-    }
-
+    results.reserve(algorithms.size());
     for (const auto& alg : algorithms) {
-        results.push_back(PerformHash(fileData, alg));
+        results.push_back(HashFileStream(filePath, alg));
     }
-
     return results;
 }
 
@@ -209,6 +199,119 @@ std::vector<BYTE> HashCalculator::ReadFileData(const std::wstring& filePath) {
     return data;
 }
 
+HashResult HashCalculator::HashFileStream(const std::wstring& filePath, HashAlgorithm algorithm) {
+    HashResult result;
+    result.algorithm = GetAlgorithmName(algorithm);
+    auto start = std::chrono::high_resolution_clock::now();
+
+    HANDLE hFile = CreateFileW(filePath.c_str(),
+                               GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_DELETE,
+                               nullptr,
+                               OPEN_EXISTING,
+                               FILE_FLAG_SEQUENTIAL_SCAN,
+                               nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        result.success = false;
+        result.errorMessage = L"Failed to open file";
+        return result;
+    }
+
+    LARGE_INTEGER li = {};
+    uint64_t totalBytes = 0;
+    if (GetFileSizeEx(hFile, &li)) {
+        totalBytes = static_cast<uint64_t>(li.QuadPart);
+    }
+
+    HCRYPTPROV hProv = 0;
+    HCRYPTHASH hHash = 0;
+    if (!CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)) {
+        CloseHandle(hFile);
+        result.success = false;
+        result.errorMessage = L"Failed to acquire cryptographic context";
+        return result;
+    }
+
+    ALG_ID algId = GetCryptoAPIAlgId(algorithm);
+    if (!CryptCreateHash(hProv, algId, 0, 0, &hHash)) {
+        CryptReleaseContext(hProv, 0);
+        CloseHandle(hFile);
+        result.success = false;
+        result.errorMessage = L"Failed to create hash object";
+        return result;
+    }
+
+    const DWORD kBufSize = static_cast<DWORD>(m_chunkSize);
+    std::vector<BYTE> buffer(kBufSize);
+    DWORD bytesRead = 0;
+    BOOL ok = TRUE;
+    uint64_t processed = 0;
+    for (;;) {
+        ok = ReadFile(hFile, buffer.data(), kBufSize, &bytesRead, nullptr);
+        if (!ok) {
+            CryptDestroyHash(hHash);
+            CryptReleaseContext(hProv, 0);
+            CloseHandle(hFile);
+            result.success = false;
+            result.errorMessage = L"Failed to read file";
+            return result;
+        }
+        if (bytesRead == 0) {
+            break;
+        }
+        processed += bytesRead;
+        if (m_cancel && m_cancel->load()) {
+            CryptDestroyHash(hHash);
+            CryptReleaseContext(hProv, 0);
+            CloseHandle(hFile);
+            result.success = false;
+            result.errorMessage = L"Cancelled";
+            return result;
+        }
+        if (!CryptHashData(hHash, buffer.data(), bytesRead, 0)) {
+            CryptDestroyHash(hHash);
+            CryptReleaseContext(hProv, 0);
+            CloseHandle(hFile);
+            result.success = false;
+            result.errorMessage = L"Failed to hash data";
+            return result;
+        }
+        if (m_progress) {
+            m_progress(totalBytes, processed);
+        }
+    }
+
+    DWORD hashLen = 0;
+    DWORD dataLen = sizeof(DWORD);
+    if (!CryptGetHashParam(hHash, HP_HASHSIZE, reinterpret_cast<BYTE*>(&hashLen), &dataLen, 0)) {
+        CryptDestroyHash(hHash);
+        CryptReleaseContext(hProv, 0);
+        CloseHandle(hFile);
+        result.success = false;
+        result.errorMessage = L"Failed to get hash size";
+        return result;
+    }
+    std::vector<BYTE> hashData(hashLen);
+    if (!CryptGetHashParam(hHash, HP_HASHVAL, hashData.data(), &hashLen, 0)) {
+        CryptDestroyHash(hHash);
+        CryptReleaseContext(hProv, 0);
+        CloseHandle(hFile);
+        result.success = false;
+        result.errorMessage = L"Failed to get hash value";
+        return result;
+    }
+
+    CryptDestroyHash(hHash);
+    CryptReleaseContext(hProv, 0);
+    CloseHandle(hFile);
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    result.calculationTime = diff.count();
+    result.success = true;
+    result.result = BytesToHexString(hashData);
+    return result;
+}
 // Test function
 void TestHashCalculation() {
     std::wcout << L"=== Hash Calculation Test ===" << std::endl;

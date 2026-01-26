@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 #include <chrono>
+#include <functional>
+#include <atomic>
 
 #pragma comment(lib, "advapi32.lib")
 
@@ -27,6 +29,10 @@ public:
     HashCalculator();
     ~HashCalculator();
 
+    void SetChunkSize(size_t bytes);
+    void SetProgressCallback(std::function<void(uint64_t, uint64_t)> cb);
+    void SetCancelFlag(std::atomic<bool>* flag);
+
     // File hashing
     HashResult CalculateFileHash(const std::wstring& filePath, HashAlgorithm algorithm);
     std::vector<HashResult> CalculateFileHashes(const std::wstring& filePath, const std::vector<HashAlgorithm>& algorithms);
@@ -47,7 +53,11 @@ private:
     std::wstring BytesToHexString(const std::vector<BYTE>& bytes);
     std::vector<BYTE> StringToBytes(const std::wstring& str);
     std::vector<BYTE> ReadFileData(const std::wstring& filePath);
+    HashResult HashFileStream(const std::wstring& filePath, HashAlgorithm algorithm);
 
 private:
     std::vector<HashResult> m_lastResults;
+    size_t m_chunkSize = (1u << 20);
+    std::function<void(uint64_t, uint64_t)> m_progress;
+    std::atomic<bool>* m_cancel = nullptr;
 };

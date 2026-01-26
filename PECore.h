@@ -9,6 +9,8 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <functional>
+#include <atomic>
 
 enum class SignatureSource {
     Auto,
@@ -25,6 +27,8 @@ struct PEAnalysisOptions {
     bool computeHashes = false;
     std::vector<HashAlgorithm> hashAlgorithms;
     ReportTimeFormat timeFormat = ReportTimeFormat::Local;
+    std::function<void(uint64_t, uint64_t)> hashProgress;
+    std::atomic<bool>* hashCancel = nullptr;
 };
 
 struct PEAnalysisResult {

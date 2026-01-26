@@ -119,6 +119,13 @@ bool AnalyzePeFile(const std::wstring& filePath, const PEAnalysisOptions& opt, P
 
     if (opt.computeHashes) {
         HashCalculator calc;
+        calc.SetChunkSize(4u << 20);
+        if (opt.hashCancel) {
+            calc.SetCancelFlag(opt.hashCancel);
+        }
+        if (opt.hashProgress) {
+            calc.SetProgressCallback(opt.hashProgress);
+        }
         std::vector<HashAlgorithm> algs = opt.hashAlgorithms;
         if (algs.empty()) {
             algs = {HashAlgorithm::SHA256};

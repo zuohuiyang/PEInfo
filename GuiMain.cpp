@@ -26,8 +26,10 @@ static const wchar_t* kMainClassName = L"PEInfoGuiMainWindow";
 
 static const UINT WM_APP_ANALYSIS_DONE = WM_APP + 1;
 static const UINT WM_APP_VERIFY_DONE = WM_APP + 2;
+static const UINT WM_APP_HASH_PROGRESS = WM_APP + 3;
 static const UINT_PTR kTimerImportsFilter = 1;
 static const WPARAM IDM_SYS_SETTINGS = 0x1FF0;
+static const WPARAM IDM_SYS_CANCEL = 0x1FF2;
 
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 DECLARE_HANDLE(DPI_AWARENESS_CONTEXT);
@@ -121,6 +123,8 @@ struct GuiState {
     };
     std::vector<ImportRow> importsAllRows;
     std::wstring importsSelectedDll;
+    std::atomic<bool>* analysisCancel = nullptr;
+    int hashProgressPercent = -1;
 };
 
 static UINT GetBestWindowDpi(HWND hwnd);
@@ -914,10 +918,10 @@ static void RefreshAllViews(GuiState* s) {
 }
 
 static unsigned __stdcall AnalysisThreadProc(void* param) {
-    auto* msg = reinterpret_cast<std::pair<HWND, std::wstring>*>(param);
-    HWND hwnd = msg->first;
-    std::wstring filePath = msg->second;
-    delete msg;
+    struct Payload { HWND hwnd; std::wstring file; std::atomic<bool>* cancel; };
+    auto* pl = reinterpret_cast<Payload*>(param);
+    HWND hwnd = pl->hwnd;
+    std::wstring filePath = pl->file;
 
     auto* resultMsg = new AnalysisResultMessage();
     auto ar = std::make_unique<PEAnalysisResult>();
@@ -929,6 +933,15 @@ static unsigned __stdcall AnalysisThreadProc(void* param) {
     opt.computeHashes = true;
     opt.hashAlgorithms = {HashAlgorithm::MD5, HashAlgorithm::SHA1, HashAlgorithm::SHA256};
     opt.timeFormat = ReportTimeFormat::Local;
+    opt.hashCancel = pl->cancel;
+    opt.hashProgress = [hwnd](uint64_t total, uint64_t processed) {
+        int pct = 0;
+        if (total > 0) {
+            pct = static_cast<int>((processed * 100) / total);
+            if (pct > 100) pct = 100;
+        }
+        PostMessageW(hwnd, WM_APP_HASH_PROGRESS, static_cast<WPARAM>(pct), 0);
+    };
 
     std::wstring err;
     if (!AnalyzePeFile(filePath, opt, *ar, err)) {
@@ -940,6 +953,7 @@ static unsigned __stdcall AnalysisThreadProc(void* param) {
     }
 
     PostMessageW(hwnd, WM_APP_ANALYSIS_DONE, 0, reinterpret_cast<LPARAM>(resultMsg));
+    delete pl;
     return 0;
 }
 
@@ -1015,12 +1029,20 @@ static void StartAnalysis(GuiState* s, const std::wstring& filePath) {
     }
     s->currentFile = filePath;
     s->analysis.reset();
+    s->hashProgressPercent = -1;
+    if (s->analysisCancel) {
+        delete s->analysisCancel;
+        s->analysisCancel = nullptr;
+    }
+    s->analysisCancel = new std::atomic<bool>(false);
     SetBusy(s, true);
     SetWindowTextWString(s->pageSummary, L"\u6b63\u5728\u89e3\u6790...");
+    SetWindowTextWString(s->pageHash, L"\u6b63\u5728\u8ba1\u7b97\u54c8\u5e0c...");
     SetWindowTextWString(s->pageResources, L"\u6b63\u5728\u89e3\u6790...");
     UpdateFileInfo(s);
 
-    auto* payload = new std::pair<HWND, std::wstring>(s->hwnd, filePath);
+    struct Payload { HWND hwnd; std::wstring file; std::atomic<bool>* cancel; };
+    auto* payload = new Payload{s->hwnd, filePath, s->analysisCancel};
     uintptr_t th = _beginthreadex(nullptr, 0, AnalysisThreadProc, payload, 0, nullptr);
     if (th == 0) {
         delete payload;
@@ -1281,6 +1303,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (sys) {
                 AppendMenuW(sys, MF_SEPARATOR, 0, nullptr);
                 AppendMenuW(sys, MF_STRING, IDM_SYS_SETTINGS, L"\u8bbe\u7f6e...");
+                AppendMenuW(sys, MF_STRING, IDM_SYS_CANCEL, L"\u53d6\u6d88\u89e3\u6790");
             }
 
             s->tab = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_TAB), nullptr, nullptr);
@@ -1409,12 +1432,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     ApplyImportsFilterNow(s);
                     return 0;
                 }
+                case VK_ESCAPE: {
+                    if (s->busy && s->analysisCancel) {
+                        s->analysisCancel->store(true);
+                    }
+                    return 0;
+                }
             }
             break;
         }
         case WM_SYSCOMMAND: {
             if ((wParam & 0xFFF0) == IDM_SYS_SETTINGS) {
                 ShowSettingsDialog(hwnd);
+                return 0;
+            }
+            if ((wParam & 0xFFF0) == IDM_SYS_CANCEL) {
+                if (s->busy && s->analysisCancel) {
+                    s->analysisCancel->store(true);
+                }
                 return 0;
             }
             break;
@@ -1466,6 +1501,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             auto* r = reinterpret_cast<AnalysisResultMessage*>(lParam);
             if (!r->ok) {
                 SetBusy(s, false);
+                if (s->analysisCancel) { delete s->analysisCancel; s->analysisCancel = nullptr; }
                 s->analysis.reset();
                 RefreshAllViews(s);
                 MessageBoxError(s->hwnd, r->error.empty() ? L"\u89e3\u6790\u5931\u8d25" : r->error);
@@ -1474,8 +1510,19 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             s->analysis = std::move(r->result);
             SetBusy(s, false);
+            if (s->analysisCancel) { delete s->analysisCancel; s->analysisCancel = nullptr; }
             RefreshAllViews(s);
             delete r;
+            return 0;
+        }
+        case WM_APP_HASH_PROGRESS: {
+            int pct = static_cast<int>(wParam);
+            s->hashProgressPercent = pct;
+            if (pct >= 0 && pct <= 100) {
+                std::wostringstream out;
+                out << L"\u6b63\u5728\u8ba1\u7b97\u54c8\u5e0c: " << pct << L"%\r\n";
+                SetWindowTextWString(s->pageHash, out.str());
+            }
             return 0;
         }
         case WM_APP_VERIFY_DONE: {
@@ -1512,6 +1559,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (s->uiFont) {
                 DeleteObject(s->uiFont);
                 s->uiFont = nullptr;
+            }
+            if (s->analysisCancel) {
+                delete s->analysisCancel;
+                s->analysisCancel = nullptr;
             }
             PostQuitMessage(0);
             return 0;
