@@ -678,8 +678,40 @@ struct SettingsDialogState {
     HWND btnCancel = nullptr;
     bool installedBefore = false;
     HFONT uiFont = nullptr;
+    HFONT hintFont = nullptr;
+    HBRUSH bgBrush = nullptr;
     UINT dpi = 96;
 };
+
+static void GetSettingsDialogWindowSizeForDpi(UINT dpi, int& w, int& h) {
+    int padY = MulDiv(16, static_cast<int>(dpi), 96);
+    int rowGap = MulDiv(10, static_cast<int>(dpi), 96);
+    int chkH = MulDiv(24, static_cast<int>(dpi), 96);
+    int hintH = MulDiv(24, static_cast<int>(dpi), 96);
+    int btnH = MulDiv(32, static_cast<int>(dpi), 96);
+    int gapAfterHint = MulDiv(16, static_cast<int>(dpi), 96);
+
+    int clientW = MulDiv(560, static_cast<int>(dpi), 96);
+    int clientH = padY + chkH + rowGap + hintH + gapAfterHint + btnH + padY;
+
+    RECT rc = {0, 0, clientW, clientH};
+    DWORD style = WS_CAPTION | WS_SYSMENU;
+    DWORD exStyle = WS_EX_DLGMODALFRAME;
+
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    if (user32) {
+        using AdjustWindowRectExForDpiFn = BOOL(WINAPI*)(LPRECT, DWORD, BOOL, DWORD, UINT);
+        auto fn = reinterpret_cast<AdjustWindowRectExForDpiFn>(GetProcAddress(user32, "AdjustWindowRectExForDpi"));
+        if (fn && fn(&rc, style, FALSE, exStyle, dpi)) {
+            w = rc.right - rc.left;
+            h = rc.bottom - rc.top;
+            return;
+        }
+    }
+    AdjustWindowRectEx(&rc, style, FALSE, exStyle);
+    w = rc.right - rc.left;
+    h = rc.bottom - rc.top;
+}
 
 static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     SettingsDialogState* s = reinterpret_cast<SettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
@@ -699,6 +731,19 @@ static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
             s->hwnd = hwnd;
             s->dpi = GetBestWindowDpi(hwnd);
             s->uiFont = CreateUiFontForDpi(s->dpi);
+            s->bgBrush = CreateSolidBrush(GetSysColor(COLOR_WINDOW));
+            if (s->uiFont) {
+                LOGFONTW lf = {};
+                if (GetObjectW(s->uiFont, sizeof(lf), &lf) == sizeof(lf)) {
+                    LONG delta = static_cast<LONG>(MulDiv(2, static_cast<int>(s->dpi), 96));
+                    if (lf.lfHeight < 0) {
+                        lf.lfHeight = (std::min)(lf.lfHeight + delta, static_cast<LONG>(-1));
+                    } else if (lf.lfHeight > 0) {
+                        lf.lfHeight = (std::max)(lf.lfHeight - delta, static_cast<LONG>(1));
+                    }
+                    s->hintFont = CreateFontIndirectW(&lf);
+                }
+            }
 
             int padX = MulDiv(12, static_cast<int>(s->dpi), 96);
             int padY = MulDiv(16, static_cast<int>(s->dpi), 96);
@@ -717,7 +762,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
                                               nullptr,
                                               nullptr);
             s->info = CreateWindowW(L"STATIC",
-                                    L"Windows 11 \u4e0b\u53ef\u80fd\u5728\u201c\u663e\u793a\u66f4\u591a\u9009\u9879\u201d\u91cc\u51fa\u73b0",
+                                    L"\u63d0\u793a\uff1aWindows 11 \u4e2d\u8be5\u83dc\u5355\u9879\u53ef\u80fd\u4f4d\u4e8e\u201c\u663e\u793a\u66f4\u591a\u9009\u9879\u201d",
                                     WS_CHILD | WS_VISIBLE | SS_LEFT,
                                     padX, padY + chkH + rowGap, MulDiv(520, static_cast<int>(s->dpi), 96), infoH,
                                     hwnd,
@@ -740,7 +785,30 @@ static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
             for (HWND c : controls) {
                 SendMessageW(c, WM_SETFONT, reinterpret_cast<WPARAM>(s->uiFont), TRUE);
             }
+            if (s->hintFont) {
+                SendMessageW(s->info, WM_SETFONT, reinterpret_cast<WPARAM>(s->hintFont), TRUE);
+            }
             return 0;
+        }
+        case WM_CTLCOLORBTN: {
+            if (reinterpret_cast<HWND>(lParam) != s->chkContextMenu || !s->bgBrush) {
+                break;
+            }
+            HDC dc = reinterpret_cast<HDC>(wParam);
+            SetBkMode(dc, TRANSPARENT);
+            return reinterpret_cast<INT_PTR>(s->bgBrush);
+        }
+        case WM_CTLCOLORSTATIC: {
+            if (!s->bgBrush) {
+                break;
+            }
+            HDC dc = reinterpret_cast<HDC>(wParam);
+            SetBkMode(dc, TRANSPARENT);
+            if (reinterpret_cast<HWND>(lParam) == s->info) {
+                SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
+                return reinterpret_cast<INT_PTR>(s->bgBrush);
+            }
+            break;
         }
         case WM_COMMAND: {
             switch (LOWORD(wParam)) {
@@ -785,6 +853,14 @@ static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
                 DeleteObject(s->uiFont);
                 s->uiFont = nullptr;
             }
+            if (s->hintFont) {
+                DeleteObject(s->hintFont);
+                s->hintFont = nullptr;
+            }
+            if (s->bgBrush) {
+                DeleteObject(s->bgBrush);
+                s->bgBrush = nullptr;
+            }
             break;
         }
     }
@@ -813,8 +889,9 @@ static void ShowSettingsDialog(HWND owner) {
     RECT ownerRc = {};
     GetWindowRect(owner, &ownerRc);
     UINT dpi = GetBestWindowDpi(owner);
-    int w = MulDiv(560, static_cast<int>(dpi), 96);
-    int h = MulDiv(170, static_cast<int>(dpi), 96);
+    int w = 0;
+    int h = 0;
+    GetSettingsDialogWindowSizeForDpi(dpi, w, h);
     int x = ownerRc.left + ((ownerRc.right - ownerRc.left) - w) / 2;
     int y = ownerRc.top + ((ownerRc.bottom - ownerRc.top) - h) / 2;
 
