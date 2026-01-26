@@ -51,8 +51,7 @@ enum : UINT {
     IDC_SIGNATURE = 2006,
     IDC_HASH = 2007,
     IDC_IMPORTS_DLLS = 2008,
-    IDC_IMPORTS_FILTER = 2101,
-    IDC_IMPORTS_CLEAR = 2102
+    IDC_IMPORTS_FILTER = 2101
 };
 
 enum class TabIndex : int {
@@ -99,7 +98,6 @@ struct GuiState {
     HWND pageHash = nullptr;
     HWND importsFilterLabel = nullptr;
     HWND importsFilterEdit = nullptr;
-    HWND importsClearBtn = nullptr;
 
     bool busy = false;
     bool verifyInFlight = false;
@@ -129,6 +127,8 @@ struct GuiState {
 
 static UINT GetBestWindowDpi(HWND hwnd);
 static HFONT CreateUiFontForDpi(UINT dpi);
+static void FitImportsDllColumns(GuiState* s);
+static void FitImportsFuncColumns(GuiState* s);
 
 static void CenterWindowOnWorkArea(HWND hwnd) {
     if (!hwnd) {
@@ -870,7 +870,12 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
     ShowWindow(s->pageImportsDlls, showImportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->importsFilterLabel, showImportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->importsFilterEdit, showImportsFilter ? SW_SHOW : SW_HIDE);
-    ShowWindow(s->importsClearBtn, showImportsFilter ? SW_SHOW : SW_HIDE);
+    if (showImportsFilter) {
+        FitImportsDllColumns(s);
+        FitImportsFuncColumns(s);
+        InvalidateRect(s->pageImportsDlls, nullptr, TRUE);
+        InvalidateRect(s->pageImports, nullptr, TRUE);
+    }
 }
 
 static void UpdateFileInfo(GuiState* s) {
@@ -1069,6 +1074,75 @@ static std::wstring PromptOpenFile(HWND hwnd) {
     return fileName;
 }
 
+static void FitImportsDllColumns(GuiState* s) {
+    if (!s || !s->pageImportsDlls) {
+        return;
+    }
+
+    HWND header = ListView_GetHeader(s->pageImportsDlls);
+    if (!header || Header_GetItemCount(header) < 2) {
+        return;
+    }
+
+    RECT rc = {};
+    GetClientRect(s->pageImportsDlls, &rc);
+    int clientW = rc.right - rc.left;
+    if (clientW <= 0) {
+        return;
+    }
+
+    int gap = MulDiv(12, static_cast<int>(s->dpi), 96);
+    int minDllW = MulDiv(80, static_cast<int>(s->dpi), 96);
+    int minCountW = MulDiv(52, static_cast<int>(s->dpi), 96);
+    int maxCountW = clientW - minDllW - gap;
+    if (maxCountW < minCountW) {
+        maxCountW = minCountW;
+    }
+    int countW = MulDiv(64, static_cast<int>(s->dpi), 96);
+    ListView_SetColumnWidth(s->pageImportsDlls, 1, LVSCW_AUTOSIZE);
+    countW = ListView_GetColumnWidth(s->pageImportsDlls, 1);
+    if (countW < minCountW) countW = minCountW;
+    if (countW > maxCountW) countW = maxCountW;
+    ListView_SetColumnWidth(s->pageImportsDlls, 1, countW);
+
+    int dllW = clientW - countW - gap;
+    if (dllW < minDllW) dllW = minDllW;
+    ListView_SetColumnWidth(s->pageImportsDlls, 0, dllW);
+}
+
+static void FitImportsFuncColumns(GuiState* s) {
+    if (!s || !s->pageImports) {
+        return;
+    }
+
+    HWND header = ListView_GetHeader(s->pageImports);
+    if (!header || Header_GetItemCount(header) < 2) {
+        return;
+    }
+
+    RECT rc = {};
+    GetClientRect(s->pageImports, &rc);
+    int clientW = rc.right - rc.left;
+    if (clientW <= 0) {
+        return;
+    }
+
+    int gap = MulDiv(12, static_cast<int>(s->dpi), 96);
+    int minTypeW = MulDiv(70, static_cast<int>(s->dpi), 96);
+    int maxTypeW = MulDiv(120, static_cast<int>(s->dpi), 96);
+    int minFuncW = MulDiv(120, static_cast<int>(s->dpi), 96);
+
+    ListView_SetColumnWidth(s->pageImports, 0, LVSCW_AUTOSIZE);
+    int typeW = ListView_GetColumnWidth(s->pageImports, 0);
+    if (typeW < minTypeW) typeW = minTypeW;
+    if (typeW > maxTypeW) typeW = maxTypeW;
+    ListView_SetColumnWidth(s->pageImports, 0, typeW);
+
+    int funcW = clientW - typeW - gap;
+    if (funcW < minFuncW) funcW = minFuncW;
+    ListView_SetColumnWidth(s->pageImports, 1, funcW);
+}
+
 static void UpdateLayout(GuiState* s) {
     RECT rc = {};
     GetClientRect(s->hwnd, &rc);
@@ -1103,20 +1177,18 @@ static void UpdateLayout(GuiState* s) {
     MoveWindow(s->pageSummary, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pageSections, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     int filterH = MulDiv(28, static_cast<int>(s->dpi), 96);
-    int filterLabelW = MulDiv(56, static_cast<int>(s->dpi), 96);
-    int filterBtnW = MulDiv(72, static_cast<int>(s->dpi), 96);
+    int filterLabelW = MulDiv(28, static_cast<int>(s->dpi), 96);
     int filterY = pageRc.top;
     int filterX = pageRc.left;
     int filterGap = pad;
     int filterEditX = filterX + filterLabelW + filterGap;
-    int filterEditW = pageW - filterLabelW - filterGap - filterBtnW - filterGap;
+    int filterEditW = pageW - filterLabelW - filterGap;
     if (filterEditW < MulDiv(100, static_cast<int>(s->dpi), 96)) {
         filterEditW = MulDiv(100, static_cast<int>(s->dpi), 96);
     }
 
     MoveWindow(s->importsFilterLabel, filterX, filterY, filterLabelW, filterH, TRUE);
     MoveWindow(s->importsFilterEdit, filterEditX, filterY, filterEditW, filterH, TRUE);
-    MoveWindow(s->importsClearBtn, filterEditX + filterEditW + filterGap, filterY, filterBtnW, filterH, TRUE);
     int importsY = pageRc.top + filterH + pad;
     int importsH = pageH - filterH - pad;
     int splitGap = pad;
@@ -1131,6 +1203,10 @@ static void UpdateLayout(GuiState* s) {
 
     MoveWindow(s->pageImportsDlls, pageRc.left, importsY, leftW, importsH, TRUE);
     MoveWindow(s->pageImports, pageRc.left + leftW + splitGap, importsY, rightW, importsH, TRUE);
+    FitImportsDllColumns(s);
+    FitImportsFuncColumns(s);
+    InvalidateRect(s->pageImportsDlls, nullptr, TRUE);
+    InvalidateRect(s->pageImports, nullptr, TRUE);
     MoveWindow(s->pageExports, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pageResources, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pagePdb, pageRc.left, pageRc.top, pageW, pageH, TRUE);
@@ -1223,7 +1299,6 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->pageHash,
         s->importsFilterLabel,
         s->importsFilterEdit,
-        s->importsClearBtn,
     };
     for (HWND hwnd : controls) {
         if (hwnd) {
@@ -1232,6 +1307,9 @@ static void ApplyUiFontAndTheme(GuiState* s) {
     }
     if (s->btnSettingsGear && s->iconFont) {
         SendMessageW(s->btnSettingsGear, WM_SETFONT, reinterpret_cast<WPARAM>(s->iconFont), TRUE);
+    }
+    if (s->importsFilterLabel && s->iconFont) {
+        SendMessageW(s->importsFilterLabel, WM_SETFONT, reinterpret_cast<WPARAM>(s->iconFont), TRUE);
     }
 
     SetWindowTheme(s->tab, L"Explorer", nullptr);
@@ -1340,11 +1418,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->pageImports = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS), nullptr, nullptr);
             s->pageExports = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS), nullptr, nullptr);
 
-            DWORD filterLabelStyle = WS_CHILD | SS_LEFT | SS_CENTERIMAGE;
-            s->importsFilterLabel = CreateWindowW(L"STATIC", L"\u8fc7\u6ee4\uff1a", filterLabelStyle, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
+            DWORD filterLabelStyle = WS_CHILD | SS_CENTER | SS_CENTERIMAGE;
+            s->importsFilterLabel = CreateWindowW(L"STATIC", L"\uE721", filterLabelStyle, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
             DWORD filterEditStyle = WS_CHILD | ES_LEFT | ES_AUTOHSCROLL;
             s->importsFilterEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", filterEditStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS_FILTER), nullptr, nullptr);
-            s->importsClearBtn = CreateWindowW(L"BUTTON", L"\u6e05\u7a7a", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS_CLEAR), nullptr, nullptr);
 
             auto colW = [&](int base) { return MulDiv(base, static_cast<int>(s->dpi), 96); };
             AddListViewColumn(s->pageSections, 0, colW(140), L"Name");
@@ -1422,14 +1499,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     if (HIWORD(wParam) == EN_CHANGE) {
                         SetTimer(hwnd, kTimerImportsFilter, 200, nullptr);
                     }
-                    return 0;
-                }
-                case IDC_IMPORTS_CLEAR: {
-                    if (s->importsFilterEdit) {
-                        SetWindowTextW(s->importsFilterEdit, L"");
-                    }
-                    KillTimer(hwnd, kTimerImportsFilter);
-                    ApplyImportsFilterNow(s);
                     return 0;
                 }
                 case VK_ESCAPE: {
