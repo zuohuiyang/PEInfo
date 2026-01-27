@@ -8,8 +8,7 @@
 
 ## 项目结构与目标
 - 解决方案：`PEInfo.sln`
-- 主程序：`PEInfo.exe`（命令行工具，Win32 / x64 构建）
-- 测试工程：`test_build\PEAnalyzerTest.vcxproj`（控制台测试）
+- 主程序：`PEInfo.exe`（GUI 工具，Win32 / x64 构建）
 
 ## 构建与打包
 - 构建脚本：`build.bat`
@@ -18,16 +17,17 @@
 - 打包产物：`dist\PEInfo_x86_Release.zip`、`dist\PEInfo_x64_Release.zip`
 
 ## 运行与验证
-- 启动 CLI：`./Release/PEInfo.exe --help`
-- 示例：`./Release/PEInfo.exe C:\Windows\System32\notepad.exe --all`
-- 测试执行：`./test_build/Release/PEAnalyzerTest.exe`
-  - 覆盖：PE 解析基础、文本与文件哈希、导入解析健壮性
+- 启动 GUI：运行生成的 `PEInfo.exe`
+  - 可通过“打开文件”选择 PE 文件，或把文件拖放到窗口中打开分析
 
-## 当前功能（CLI）
-- 输出：`--format text|json`，可用 `--out <path>` 写 UTF-8 文件
-- 分析项：`--summary/--sections/--imports/--imports-all/--exports/--pdb/--sig/--verify`
-- 校验：`--verify` 会用退出码反映签名验证结果（通过/失败/未签名）
-- 哈希：`--hash md5|sha1|sha256`
+## 当前功能（GUI）
+- 概要信息：位数/Machine/Sections/SizeOfImage/EntryPointRVA/ImageBase/Subsystem
+- Sections：节表摘要
+- Imports / Delay-Imports：按 DLL 汇总并列出 API（支持截断/不截断）
+- Exports：导出函数列表
+- PDB 信息：解析 Debug Directory（RSDS GUID + Age + PDB Path）
+- 数字签名：检测 embedded / catalog 并可验证，展示 signer/thumbprint 等信息
+- 文件哈希：MD5/SHA1/SHA256（Windows CryptoAPI）
 
 ## 开发注意事项
 - 编码：UTF-8；界面文本中文；Win32 原生控件

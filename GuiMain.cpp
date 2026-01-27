@@ -1908,7 +1908,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     RegisterClassExW(&wc);
 
-    HWND hwnd = CreateWindowExW(0, kMainClassName, L"PEInfo GUI", WS_OVERLAPPEDWINDOW,
+    HWND hwnd = CreateWindowExW(0, kMainClassName, L"PEInfo", WS_OVERLAPPEDWINDOW,
                                 CW_USEDEFAULT, CW_USEDEFAULT, 1100, 720,
                                 nullptr, nullptr, hInstance, &state);
     if (!hwnd) {

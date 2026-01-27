@@ -23,7 +23,8 @@
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{C6E7F2D6-DC6C-4A9F-8F2E-2A64E88E12B3}</ProjectGuid>
     <RootNamespace>PEInfoGui</RootNamespace>
-    <ProjectName>PEInfoGui</ProjectName>
+    <ProjectName>PEInfo</ProjectName>
+    <TargetName>PEInfo</TargetName>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
