@@ -28,6 +28,7 @@ static const UINT WM_APP_ANALYSIS_DONE = WM_APP + 1;
 static const UINT WM_APP_VERIFY_DONE = WM_APP + 2;
 static const UINT WM_APP_HASH_PROGRESS = WM_APP + 3;
 static const UINT_PTR kTimerImportsFilter = 1;
+static const UINT_PTR kTimerExportsFilter = 2;
 static const WPARAM IDM_SYS_SETTINGS = 0x1FF0;
 static const WPARAM IDM_SYS_CANCEL = 0x1FF2;
 
@@ -51,7 +52,8 @@ enum : UINT {
     IDC_SIGNATURE = 2006,
     IDC_HASH = 2007,
     IDC_IMPORTS_DLLS = 2008,
-    IDC_IMPORTS_FILTER = 2101
+    IDC_IMPORTS_FILTER = 2101,
+    IDC_EXPORTS_FILTER = 2102
 };
 
 enum class TabIndex : int {
@@ -98,6 +100,8 @@ struct GuiState {
     HWND pageHash = nullptr;
     HWND importsFilterLabel = nullptr;
     HWND importsFilterEdit = nullptr;
+    HWND exportsFilterLabel = nullptr;
+    HWND exportsFilterEdit = nullptr;
 
     bool busy = false;
     bool verifyInFlight = false;
@@ -121,6 +125,15 @@ struct GuiState {
     };
     std::vector<ImportRow> importsAllRows;
     std::wstring importsSelectedDll;
+
+    struct ExportRow {
+        std::wstring ordinal;
+        std::wstring rva;
+        std::wstring name;
+        std::wstring haystackLower;
+    };
+    std::vector<ExportRow> exportsAllRows;
+
     std::atomic<bool>* analysisCancel = nullptr;
     int hashProgressPercent = -1;
 };
@@ -295,17 +308,6 @@ static void PopulateSections(HWND list, const PEParser& parser) {
     }
 }
 
-static void PopulateExports(HWND list, const PEParser& parser) {
-    ListView_DeleteAllItems(list);
-    const auto& exports = parser.GetExports();
-    for (int i = 0; i < static_cast<int>(exports.size()); ++i) {
-        const auto& e = exports[static_cast<size_t>(i)];
-        SetListViewText(list, i, 0, std::to_wstring(e.ordinal));
-        SetListViewText(list, i, 1, HexU32(e.rva, 8));
-        SetListViewText(list, i, 2, e.hasName ? ToWStringUtf8BestEffort(e.name) : L"(no-name)");
-    }
-}
-
 static void PopulateImportDlls(HWND list, const std::vector<std::pair<std::wstring, int>>& rows) {
     ListView_DeleteAllItems(list);
 
@@ -345,6 +347,21 @@ static void BuildImportRowsFromParser(std::vector<GuiState::ImportRow>& out, con
 
     addDlls(parser.GetImports(), L"Import");
     addDlls(parser.GetDelayImports(), L"Delay");
+}
+
+static void BuildExportRowsFromParser(std::vector<GuiState::ExportRow>& out, const PEParser& parser) {
+    out.clear();
+
+    const auto& exports = parser.GetExports();
+    out.reserve(exports.size());
+    for (const auto& e : exports) {
+        GuiState::ExportRow r;
+        r.ordinal = std::to_wstring(e.ordinal);
+        r.rva = HexU32(e.rva, 8);
+        r.name = e.hasName ? ToWStringUtf8BestEffort(e.name) : L"(no-name)";
+        r.haystackLower = ToLowerString(r.ordinal + L" " + r.rva + L" " + r.name);
+        out.push_back(std::move(r));
+    }
 }
 
 static void ApplyImportsFilterNow(GuiState* s) {
@@ -418,6 +435,35 @@ static void ApplyImportsFilterNow(GuiState* s) {
         return a->function < b->function;
     });
     PopulateImportFunctions(s->pageImports, funcs);
+}
+
+static void ApplyExportsFilterNow(GuiState* s) {
+    if (!s->exportsFilterEdit) {
+        return;
+    }
+
+    std::wstring q = GetControlText(s->exportsFilterEdit);
+    std::wstring qLower = ToLowerString(q);
+    std::vector<std::wstring> tokens = TokenizeQueryLower(qLower);
+
+    ListView_DeleteAllItems(s->pageExports);
+    int outRow = 0;
+    for (const auto& r : s->exportsAllRows) {
+        bool ok = true;
+        for (const auto& t : tokens) {
+            if (r.haystackLower.find(t) == std::wstring::npos) {
+                ok = false;
+                break;
+            }
+        }
+        if (!ok) {
+            continue;
+        }
+        SetListViewText(s->pageExports, outRow, 0, r.ordinal);
+        SetListViewText(s->pageExports, outRow, 1, r.rva);
+        SetListViewText(s->pageExports, outRow, 2, r.name);
+        ++outRow;
+    }
 }
 
 static void UpdateImportFunctionsForSelection(GuiState* s) {
@@ -947,6 +993,9 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
     ShowWindow(s->pageImportsDlls, showImportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->importsFilterLabel, showImportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->importsFilterEdit, showImportsFilter ? SW_SHOW : SW_HIDE);
+    bool showExportsFilter = (idx == TabIndex::Exports);
+    ShowWindow(s->exportsFilterLabel, showExportsFilter ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->exportsFilterEdit, showExportsFilter ? SW_SHOW : SW_HIDE);
     if (showImportsFilter) {
         FitImportsDllColumns(s);
         FitImportsFuncColumns(s);
@@ -977,6 +1026,7 @@ static void RefreshAllViews(GuiState* s) {
         ListView_DeleteAllItems(s->pageImports);
         ListView_DeleteAllItems(s->pageExports);
         s->importsAllRows.clear();
+        s->exportsAllRows.clear();
         SetWindowTextWString(s->pageResources, hint);
         SetWindowTextWString(s->pagePdb, L"");
         SetWindowTextWString(s->pageSignature, L"");
@@ -990,7 +1040,8 @@ static void RefreshAllViews(GuiState* s) {
     PopulateSections(s->pageSections, s->analysis->parser);
     BuildImportRowsFromParser(s->importsAllRows, s->analysis->parser);
     ApplyImportsFilterNow(s);
-    PopulateExports(s->pageExports, s->analysis->parser);
+    BuildExportRowsFromParser(s->exportsAllRows, s->analysis->parser);
+    ApplyExportsFilterNow(s);
     PopulateResources(s->pageResources, s->analysis->parser);
     PopulatePdb(s->pagePdb, s->analysis->pdb);
     PopulateSignature(s->pageSignature, *s->analysis, IsVerifyInFlightForCurrent(s));
@@ -1266,6 +1317,8 @@ static void UpdateLayout(GuiState* s) {
 
     MoveWindow(s->importsFilterLabel, filterX, filterY, filterLabelW, filterH, TRUE);
     MoveWindow(s->importsFilterEdit, filterEditX, filterY, filterEditW, filterH, TRUE);
+    MoveWindow(s->exportsFilterLabel, filterX, filterY, filterLabelW, filterH, TRUE);
+    MoveWindow(s->exportsFilterEdit, filterEditX, filterY, filterEditW, filterH, TRUE);
     int importsY = pageRc.top + filterH + pad;
     int importsH = pageH - filterH - pad;
     int splitGap = pad;
@@ -1284,7 +1337,7 @@ static void UpdateLayout(GuiState* s) {
     FitImportsFuncColumns(s);
     InvalidateRect(s->pageImportsDlls, nullptr, TRUE);
     InvalidateRect(s->pageImports, nullptr, TRUE);
-    MoveWindow(s->pageExports, pageRc.left, pageRc.top, pageW, pageH, TRUE);
+    MoveWindow(s->pageExports, pageRc.left, importsY, pageW, importsH, TRUE);
     MoveWindow(s->pageResources, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pagePdb, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pageSignature, pageRc.left, pageRc.top, pageW, pageH, TRUE);
@@ -1376,6 +1429,8 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->pageHash,
         s->importsFilterLabel,
         s->importsFilterEdit,
+        s->exportsFilterLabel,
+        s->exportsFilterEdit,
     };
     for (HWND hwnd : controls) {
         if (hwnd) {
@@ -1387,6 +1442,9 @@ static void ApplyUiFontAndTheme(GuiState* s) {
     }
     if (s->importsFilterLabel && s->iconFont) {
         SendMessageW(s->importsFilterLabel, WM_SETFONT, reinterpret_cast<WPARAM>(s->iconFont), TRUE);
+    }
+    if (s->exportsFilterLabel && s->iconFont) {
+        SendMessageW(s->exportsFilterLabel, WM_SETFONT, reinterpret_cast<WPARAM>(s->iconFont), TRUE);
     }
 
     SetWindowTheme(s->tab, L"Explorer", nullptr);
@@ -1499,6 +1557,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->importsFilterLabel = CreateWindowW(L"STATIC", L"\uE721", filterLabelStyle, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
             DWORD filterEditStyle = WS_CHILD | ES_LEFT | ES_AUTOHSCROLL;
             s->importsFilterEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", filterEditStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS_FILTER), nullptr, nullptr);
+            s->exportsFilterLabel = CreateWindowW(L"STATIC", L"\uE721", filterLabelStyle, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
+            s->exportsFilterEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", filterEditStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS_FILTER), nullptr, nullptr);
 
             auto colW = [&](int base) { return MulDiv(base, static_cast<int>(s->dpi), 96); };
             AddListViewColumn(s->pageSections, 0, colW(140), L"Name");
@@ -1578,6 +1638,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     }
                     return 0;
                 }
+                case IDC_EXPORTS_FILTER: {
+                    if (HIWORD(wParam) == EN_CHANGE) {
+                        SetTimer(hwnd, kTimerExportsFilter, 200, nullptr);
+                    }
+                    return 0;
+                }
                 case VK_ESCAPE: {
                     if (s->busy && s->analysisCancel) {
                         s->analysisCancel->store(true);
@@ -1604,6 +1670,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (wParam == kTimerImportsFilter) {
                 KillTimer(hwnd, kTimerImportsFilter);
                 ApplyImportsFilterNow(s);
+                return 0;
+            }
+            if (wParam == kTimerExportsFilter) {
+                KillTimer(hwnd, kTimerExportsFilter);
+                ApplyExportsFilterNow(s);
                 return 0;
             }
             break;
