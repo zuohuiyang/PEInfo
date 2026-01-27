@@ -358,15 +358,21 @@ static std::wstring SigPresenceToText(const PESignaturePresence& p) {
 static std::wstring FormatSummaryText(const PEAnalysisResult& ar) {
     const auto& h = ar.parser.GetHeaderInfo();
     std::wostringstream out;
-    out << L"\u6587\u4ef6: " << ar.filePath << L"\r\n";
+    out << L"Path: " << ar.filePath << L"\r\n";
     const wchar_t* bitness = h.is64Bit ? L"x64" : (h.is32Bit ? L"x86" : L"Unknown");
     out << L"Architecture: " << bitness << L" (" << CoffMachineToName(h.machine) << L", " << HexU32(h.machine, 4) << L")\r\n";
-    out << L"Sections: " << h.numberOfSections << L"\r\n";
-    out << L"TimeDateStamp: " << HexU32(h.timeDateStamp, 8) << L" (" << FormatCoffTime(h.timeDateStamp, ReportTimeFormat::Local) << L")\r\n";
-    out << L"SizeOfImage: " << HexU32(h.sizeOfImage, 8) << L"\r\n";
-    out << L"EntryPointRVA: " << HexU32(h.entryPoint, 8) << L"\r\n";
-    out << L"ImageBase: " << HexU64(h.imageBase, 16) << L"\r\n";
     out << L"Subsystem: " << ToWStringUtf8BestEffort(h.subsystem) << L"\r\n";
+    out << L"TimeDateStamp: " << HexU32(h.timeDateStamp, 8) << L" (" << FormatCoffTime(h.timeDateStamp, ReportTimeFormat::Local)
+        << L")  [\u94fe\u63a5\u5668\u5199\u5165\uff0c\u4ec5\u4f9b\u53c2\u8003]\r\n";
+
+    std::wstring md5 = L"(not computed)";
+    for (const auto& r : ar.hashes) {
+        if (r.success && r.algorithm == L"MD5") {
+            md5 = r.result;
+            break;
+        }
+    }
+    out << L"MD5: " << md5 << L"\r\n";
 
     if (ar.signaturePresenceReady) {
         out << L"Signature: " << SigPresenceToText(ar.signaturePresence) << L"\r\n";
@@ -2763,7 +2769,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     RegisterClassExW(&wc);
 
-    HWND hwnd = CreateWindowExW(0, kMainClassName, L"PEInfo", WS_OVERLAPPEDWINDOW,
+    HWND hwnd = CreateWindowExW(0, kMainClassName, L"PEInfo v1.0", WS_OVERLAPPEDWINDOW,
                                 CW_USEDEFAULT, CW_USEDEFAULT, 1100, 720,
                                 nullptr, nullptr, hInstance, &state);
     if (!hwnd) {
