@@ -172,6 +172,7 @@
     <ClInclude Include="ReportTypes.h" />
     <ClInclude Include="ReportUtil.h" />
     <ClInclude Include="ShellContextMenu.h" />
+    <ClInclude Include="StringsScanner.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -191,6 +192,7 @@
     <ClCompile Include="ReportTextWriter.cpp" />
     <ClCompile Include="ReportUtil.cpp" />
     <ClCompile Include="ShellContextMenu.cpp" />
+    <ClCompile Include="StringsScanner.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="PEInfoGui.manifest" />

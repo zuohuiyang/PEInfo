@@ -6,20 +6,27 @@
 #include "ReportTextWriter.h"
 #include "ReportUtil.h"
 #include "ShellContextMenu.h"
+#include "StringsScanner.h"
 
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <uxtheme.h>
+#include <windowsx.h>
 #include <process.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
 #include <cwctype>
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <unordered_set>
 #include <vector>
 
 static const wchar_t* kMainClassName = L"PEInfoGuiMainWindow";
@@ -27,8 +34,12 @@ static const wchar_t* kMainClassName = L"PEInfoGuiMainWindow";
 static const UINT WM_APP_ANALYSIS_DONE = WM_APP + 1;
 static const UINT WM_APP_VERIFY_DONE = WM_APP + 2;
 static const UINT WM_APP_HASH_PROGRESS = WM_APP + 3;
+static const UINT WM_APP_STRINGS_DONE = WM_APP + 4;
+static const UINT WM_APP_STRINGS_ROWS_DONE = WM_APP + 5;
 static const UINT_PTR kTimerImportsFilter = 1;
 static const UINT_PTR kTimerExportsFilter = 2;
+static const UINT_PTR kTimerStringsFilter = 3;
+static const UINT_PTR kTimerStringsFilterWork = 4;
 static const WPARAM IDM_SYS_SETTINGS = 0x1FF0;
 static const WPARAM IDM_SYS_CANCEL = 0x1FF2;
 
@@ -47,13 +58,20 @@ enum : UINT {
     IDC_SECTIONS = 2002,
     IDC_IMPORTS = 2003,
     IDC_EXPORTS = 2004,
+    IDC_STRINGS = 2010,
     IDC_RESOURCES = 2009,
     IDC_PDB = 2005,
     IDC_SIGNATURE = 2006,
     IDC_HASH = 2007,
     IDC_IMPORTS_DLLS = 2008,
     IDC_IMPORTS_FILTER = 2101,
-    IDC_EXPORTS_FILTER = 2102
+    IDC_EXPORTS_FILTER = 2102,
+    IDC_STRINGS_SEARCH = 2201,
+    IDC_STRINGS_TYPE = 2202,
+    IDC_STRINGS_MINLEN = 2203,
+    IDC_STRINGS_UNIQUE = 2204,
+    IDC_STRINGS_DETAIL = 2205,
+    IDC_STRINGS_COPYDETAIL = 2206
 };
 
 enum class TabIndex : int {
@@ -61,10 +79,19 @@ enum class TabIndex : int {
     Sections = 1,
     Imports = 2,
     Exports = 3,
-    Resources = 4,
-    DebugPdb = 5,
-    Signature = 6,
-    Hash = 7
+    Strings = 4,
+    Resources = 5,
+    DebugPdb = 6,
+    Signature = 7,
+    Hash = 8
+};
+
+enum : UINT {
+    IDM_STRINGS_COPY_TEXT = 41001,
+    IDM_STRINGS_COPY_LINE = 41002,
+    IDM_STRINGS_COPY_DETAIL = 41003,
+    IDM_STRINGS_EXPORT_TEXT = 41004,
+    IDM_STRINGS_EXPORT_JSON = 41005
 };
 
 struct VerifyResultMessage {
@@ -77,6 +104,14 @@ struct VerifyResultMessage {
 
 struct AnalysisResultMessage {
     std::unique_ptr<PEAnalysisResult> result;
+    bool ok = true;
+    std::wstring error;
+};
+
+struct StringsResultMessage {
+    std::wstring filePath;
+    std::vector<StringsHit> hits;
+    std::atomic<bool>* cancel = nullptr;
     bool ok = true;
     std::wstring error;
 };
@@ -94,6 +129,7 @@ struct GuiState {
     HWND pageImportsDlls = nullptr;
     HWND pageImports = nullptr;
     HWND pageExports = nullptr;
+    HWND pageStrings = nullptr;
     HWND pageResources = nullptr;
     HWND pagePdb = nullptr;
     HWND pageSignature = nullptr;
@@ -102,6 +138,10 @@ struct GuiState {
     HWND importsFilterEdit = nullptr;
     HWND exportsFilterLabel = nullptr;
     HWND exportsFilterEdit = nullptr;
+    HWND stringsSearchEdit = nullptr;
+    HWND stringsTypeCombo = nullptr;
+    HWND stringsMinLenEdit = nullptr;
+    HWND stringsUniqueCheck = nullptr;
 
     bool busy = false;
     bool verifyInFlight = false;
@@ -134,8 +174,48 @@ struct GuiState {
     };
     std::vector<ExportRow> exportsAllRows;
 
+    struct StringsRow {
+        uint64_t fileOffset = 0;
+        StringsHitType type = StringsHitType::Ascii;
+        std::wstring fileOffsetHex;
+        std::wstring section;
+        std::optional<DWORD> rva;
+        std::optional<ULONGLONG> va;
+        std::wstring typeText;
+        std::wstring lenText;
+        std::wstring text;
+        std::wstring haystackLower;
+    };
+    std::vector<StringsRow> stringsAllRows;
+    std::vector<int> stringsVisible;
+    bool stringsFilterRunning = false;
+    size_t stringsFilterPos = 0;
+    uint64_t stringsFilterGen = 0;
+    std::vector<std::wstring> stringsFilterTokens;
+    int stringsFilterMinLen = 4;
+    int stringsFilterType = 0;
+    bool stringsFilterUnique = true;
+    std::vector<int> stringsFilterResult;
+    std::unordered_set<std::wstring_view> stringsFilterSeen;
+
     std::atomic<bool>* analysisCancel = nullptr;
+    std::atomic<bool>* stringsCancel = nullptr;
     int hashProgressPercent = -1;
+};
+
+struct StringsRowsResultMessage {
+    std::wstring filePath;
+    std::vector<GuiState::StringsRow> rows;
+    bool ok = true;
+    std::wstring error;
+};
+
+struct StringsRowsBuildPayload {
+    HWND hwnd = nullptr;
+    std::wstring filePath;
+    std::vector<StringsHit> hits;
+    std::vector<PESectionInfo> sections;
+    ULONGLONG imageBase = 0;
 };
 
 static UINT GetBestWindowDpi(HWND hwnd);
@@ -203,6 +283,34 @@ static void SetWindowTextWString(HWND hwnd, const std::wstring& s) {
 
 static void MessageBoxError(HWND hwnd, const std::wstring& msg, const std::wstring& title = L"\u9519\u8bef") {
     MessageBoxW(hwnd, msg.c_str(), title.c_str(), MB_ICONERROR | MB_OK);
+}
+
+static bool CopyTextToClipboard(HWND owner, const std::wstring& text) {
+    if (!OpenClipboard(owner)) {
+        return false;
+    }
+    EmptyClipboard();
+    size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (!h) {
+        CloseClipboard();
+        return false;
+    }
+    void* p = GlobalLock(h);
+    if (!p) {
+        GlobalFree(h);
+        CloseClipboard();
+        return false;
+    }
+    memcpy(p, text.c_str(), bytes);
+    GlobalUnlock(h);
+    if (!SetClipboardData(CF_UNICODETEXT, h)) {
+        GlobalFree(h);
+        CloseClipboard();
+        return false;
+    }
+    CloseClipboard();
+    return true;
 }
 
 static std::wstring GetControlText(HWND hwnd) {
@@ -464,6 +572,165 @@ static void ApplyExportsFilterNow(GuiState* s) {
         SetListViewText(s->pageExports, outRow, 2, r.name);
         ++outRow;
     }
+}
+
+static std::wstring StringsTypeToText(StringsHitType t) {
+    switch (t) {
+        case StringsHitType::Ascii: return L"ascii";
+        case StringsHitType::Utf16Le: return L"utf16le";
+    }
+    return L"unknown";
+}
+
+static int GetStringsMinLenClamped(GuiState* s) {
+    if (!s || !s->stringsMinLenEdit) {
+        return 4;
+    }
+    std::wstring v = GetControlText(s->stringsMinLenEdit);
+    int n = 4;
+    try {
+        if (!v.empty()) {
+            n = std::stoi(v);
+        }
+    } catch (...) {
+        n = 4;
+    }
+    if (n < 4) n = 4;
+    if (n > 64) n = 64;
+    std::wstring normalized = std::to_wstring(n);
+    if (v != normalized) {
+        SetWindowTextWString(s->stringsMinLenEdit, normalized);
+    }
+    return n;
+}
+
+static int GetStringsTypeFilterIndex(const GuiState* s) {
+    if (!s || !s->stringsTypeCombo) {
+        return 0;
+    }
+    int sel = static_cast<int>(SendMessageW(s->stringsTypeCombo, CB_GETCURSEL, 0, 0));
+    if (sel < 0) sel = 0;
+    return sel;
+}
+
+static bool IsStringsUniqueEnabled(const GuiState* s) {
+    if (!s || !s->stringsUniqueCheck) {
+        return false;
+    }
+    return SendMessageW(s->stringsUniqueCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+}
+
+static std::optional<int> GetSelectedStringsRowIndex(const GuiState* s) {
+    if (!s || !s->pageStrings) {
+        return std::nullopt;
+    }
+    int item = ListView_GetNextItem(s->pageStrings, -1, LVNI_SELECTED);
+    if (item < 0) {
+        return std::nullopt;
+    }
+    if (item >= static_cast<int>(s->stringsVisible.size())) {
+        return std::nullopt;
+    }
+    return s->stringsVisible[static_cast<size_t>(item)];
+}
+
+static std::wstring FormatStringsDetailLine(const GuiState::StringsRow& r) {
+    std::wostringstream out;
+    out << L"Offset=" << HexU64(r.fileOffset, 8);
+    if (!r.section.empty()) {
+        out << L"  Section=" << r.section;
+    }
+    if (r.rva.has_value()) {
+        out << L"  RVA=" << HexU32(*r.rva, 8);
+    }
+    if (r.va.has_value()) {
+        out << L"  VA=" << HexU64(*r.va, 16);
+    }
+    out << L"  " << StringsTypeToText(r.type) << L"  Len=" << r.text.size();
+    return out.str();
+}
+
+static void UpdateStringsDetail(GuiState* s) {
+    (void)s;
+}
+
+static void ApplyStringsFilterNow(GuiState* s) {
+    if (!s || !s->stringsSearchEdit || !s->pageStrings) {
+        return;
+    }
+
+    if (s->stringsFilterRunning) {
+        s->stringsFilterRunning = false;
+        KillTimer(s->hwnd, kTimerStringsFilterWork);
+    }
+    ++s->stringsFilterGen;
+    s->stringsFilterRunning = true;
+    s->stringsFilterPos = 0;
+    s->stringsFilterResult.clear();
+    s->stringsFilterSeen.clear();
+
+    std::wstring qLower = ToLowerString(GetControlText(s->stringsSearchEdit));
+    s->stringsFilterTokens = TokenizeQueryLower(qLower);
+    s->stringsFilterMinLen = GetStringsMinLenClamped(s);
+    s->stringsFilterType = GetStringsTypeFilterIndex(s);
+    s->stringsFilterUnique = IsStringsUniqueEnabled(s);
+    if (s->stringsFilterUnique) {
+        s->stringsFilterSeen.reserve(std::min<size_t>(s->stringsAllRows.size(), 250000));
+    }
+
+    s->stringsVisible.clear();
+    ListView_SetItemState(s->pageStrings, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+    ListView_SetItemCountEx(s->pageStrings, 0, LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
+    UpdateStringsDetail(s);
+    SetTimer(s->hwnd, kTimerStringsFilterWork, 1, nullptr);
+}
+
+static void ContinueStringsFilterWork(GuiState* s) {
+    if (!s || !s->stringsFilterRunning) {
+        return;
+    }
+    uint64_t start = GetTickCount64();
+    size_t n = s->stringsAllRows.size();
+    while (s->stringsFilterPos < n) {
+        size_t i = s->stringsFilterPos++;
+        const auto& r = s->stringsAllRows[i];
+        if (static_cast<int>(r.text.size()) < s->stringsFilterMinLen) {
+            goto next_item;
+        }
+        if (s->stringsFilterType == 1 && r.type != StringsHitType::Ascii) {
+            goto next_item;
+        }
+        if (s->stringsFilterType == 2 && r.type != StringsHitType::Utf16Le) {
+            goto next_item;
+        }
+        for (const auto& t : s->stringsFilterTokens) {
+            if (r.haystackLower.find(t) == std::wstring::npos) {
+                goto next_item;
+            }
+        }
+        if (s->stringsFilterUnique) {
+            if (!s->stringsFilterSeen.insert(std::wstring_view(r.text)).second) {
+                goto next_item;
+            }
+        }
+        s->stringsFilterResult.push_back(static_cast<int>(i));
+    next_item:
+        if ((GetTickCount64() - start) >= 8) {
+            break;
+        }
+    }
+
+    if (s->stringsFilterPos < n) {
+        return;
+    }
+    s->stringsFilterRunning = false;
+    KillTimer(s->hwnd, kTimerStringsFilterWork);
+    s->stringsVisible = std::move(s->stringsFilterResult);
+    s->stringsFilterResult.clear();
+    s->stringsFilterSeen.clear();
+    ListView_SetItemCountEx(s->pageStrings, static_cast<int>(s->stringsVisible.size()), LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
+    InvalidateRect(s->pageStrings, nullptr, TRUE);
+    UpdateStringsDetail(s);
 }
 
 static void UpdateImportFunctionsForSelection(GuiState* s) {
@@ -985,7 +1252,7 @@ static RECT GetTabPageRect(HWND hwndMain, HWND hwndTab) {
 }
 
 static void ShowOnlyTab(GuiState* s, TabIndex idx) {
-    HWND pages[] = {s->pageSummary, s->pageSections, s->pageImports, s->pageExports, s->pageResources, s->pagePdb, s->pageSignature, s->pageHash};
+    HWND pages[] = {s->pageSummary, s->pageSections, s->pageImports, s->pageExports, s->pageStrings, s->pageResources, s->pagePdb, s->pageSignature, s->pageHash};
     for (int i = 0; i < static_cast<int>(std::size(pages)); ++i) {
         ShowWindow(pages[i], (i == static_cast<int>(idx)) ? SW_SHOW : SW_HIDE);
     }
@@ -996,11 +1263,24 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
     bool showExportsFilter = (idx == TabIndex::Exports);
     ShowWindow(s->exportsFilterLabel, showExportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->exportsFilterEdit, showExportsFilter ? SW_SHOW : SW_HIDE);
+    bool showStringsControls = (idx == TabIndex::Strings);
+    ShowWindow(s->stringsSearchEdit, showStringsControls ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->stringsTypeCombo, showStringsControls ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->stringsMinLenEdit, showStringsControls ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->stringsUniqueCheck, showStringsControls ? SW_SHOW : SW_HIDE);
     if (showImportsFilter) {
         FitImportsDllColumns(s);
         FitImportsFuncColumns(s);
         InvalidateRect(s->pageImportsDlls, nullptr, TRUE);
         InvalidateRect(s->pageImports, nullptr, TRUE);
+    }
+    if (showStringsControls) {
+        if (s->stringsVisible.empty() && !s->stringsAllRows.empty()) {
+            ApplyStringsFilterNow(s);
+        } else {
+            InvalidateRect(s->pageStrings, nullptr, TRUE);
+            UpdateStringsDetail(s);
+        }
     }
 }
 
@@ -1025,8 +1305,15 @@ static void RefreshAllViews(GuiState* s) {
         ListView_DeleteAllItems(s->pageImportsDlls);
         ListView_DeleteAllItems(s->pageImports);
         ListView_DeleteAllItems(s->pageExports);
+        ListView_SetItemCountEx(s->pageStrings, 0, LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
         s->importsAllRows.clear();
         s->exportsAllRows.clear();
+        s->stringsAllRows.clear();
+        s->stringsVisible.clear();
+        if (s->stringsFilterRunning) {
+            s->stringsFilterRunning = false;
+            KillTimer(s->hwnd, kTimerStringsFilterWork);
+        }
         SetWindowTextWString(s->pageResources, hint);
         SetWindowTextWString(s->pagePdb, L"");
         SetWindowTextWString(s->pageSignature, L"");
@@ -1111,6 +1398,85 @@ static unsigned __stdcall VerifyThreadProc(void* param) {
     return 0;
 }
 
+static unsigned __stdcall StringsThreadProc(void* param) {
+    struct Payload { HWND hwnd; std::wstring file; std::atomic<bool>* cancel; };
+    auto* pl = reinterpret_cast<Payload*>(param);
+    HWND hwnd = pl->hwnd;
+    std::wstring filePath = pl->file;
+    std::atomic<bool>* cancel = pl->cancel;
+    delete pl;
+
+    auto* msg = new StringsResultMessage();
+    msg->filePath = filePath;
+    msg->cancel = cancel;
+
+    StringsScanOptions opt;
+    opt.minLen = 4;
+    opt.maxLen = 4096;
+    opt.scanAscii = true;
+    opt.scanUtf16Le = true;
+
+    std::wstring err;
+    if (!ScanStringsFromFile(filePath, opt, msg->hits, err, cancel)) {
+        msg->ok = false;
+        msg->error = err.empty() ? L"\u626b\u63cf\u5931\u8d25" : err;
+    } else {
+        msg->ok = true;
+    }
+
+    PostMessageW(hwnd, WM_APP_STRINGS_DONE, 0, reinterpret_cast<LPARAM>(msg));
+    return 0;
+}
+
+static unsigned __stdcall StringsRowsBuildThreadProc(void* param) {
+    auto* pl = reinterpret_cast<StringsRowsBuildPayload*>(param);
+    HWND hwnd = pl->hwnd;
+    auto* msg = new StringsRowsResultMessage();
+    msg->filePath = pl->filePath;
+
+    try {
+        msg->rows.clear();
+        msg->rows.reserve(pl->hits.size());
+        for (const auto& h : pl->hits) {
+            GuiState::StringsRow r;
+            r.fileOffset = h.fileOffset;
+            r.type = h.type;
+            r.fileOffsetHex = HexU64(h.fileOffset, 8);
+            r.typeText = StringsTypeToText(r.type);
+            r.text = h.text;
+            r.lenText = std::to_wstring(r.text.size());
+
+            for (const auto& sec : pl->sections) {
+                if (sec.rawSize == 0) {
+                    continue;
+                }
+                uint64_t rawStart = sec.rawAddress;
+                uint64_t rawEnd = rawStart + sec.rawSize;
+                if (h.fileOffset < rawStart || h.fileOffset >= rawEnd) {
+                    continue;
+                }
+                uint64_t delta = h.fileOffset - rawStart;
+                DWORD rva = sec.virtualAddress + static_cast<DWORD>(delta);
+                r.section = ToWStringUtf8BestEffort(sec.name);
+                r.rva = rva;
+                r.va = pl->imageBase + static_cast<ULONGLONG>(rva);
+                break;
+            }
+
+            r.haystackLower = ToLowerString(r.section + L" " + r.typeText + L" " + r.text);
+            msg->rows.push_back(std::move(r));
+        }
+        msg->ok = true;
+    } catch (...) {
+        msg->ok = false;
+        msg->error = L"\u5904\u7406\u5931\u8d25";
+    }
+
+    PostMessageW(hwnd, WM_APP_STRINGS_ROWS_DONE, 0, reinterpret_cast<LPARAM>(msg));
+    delete pl;
+    return 0;
+}
+
 static bool HasAnyVerifyResult(const PEAnalysisResult& ar) {
     return ar.embeddedVerify.has_value() || ar.catalogVerify.has_value();
 }
@@ -1163,6 +1529,18 @@ static void StartAnalysis(GuiState* s, const std::wstring& filePath) {
     s->currentFile = filePath;
     s->analysis.reset();
     s->hashProgressPercent = -1;
+    if (s->stringsCancel) {
+        s->stringsCancel->store(true);
+    }
+    s->stringsAllRows.clear();
+    s->stringsVisible.clear();
+    if (s->stringsFilterRunning) {
+        s->stringsFilterRunning = false;
+        KillTimer(s->hwnd, kTimerStringsFilterWork);
+    }
+    if (s->pageStrings) {
+        ListView_SetItemCountEx(s->pageStrings, 0, LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
+    }
     if (s->analysisCancel) {
         delete s->analysisCancel;
         s->analysisCancel = nullptr;
@@ -1186,6 +1564,40 @@ static void StartAnalysis(GuiState* s, const std::wstring& filePath) {
     CloseHandle(reinterpret_cast<HANDLE>(th));
 }
 
+static void StartStringsScan(GuiState* s) {
+    if (!s || s->currentFile.empty() || !s->pageStrings) {
+        return;
+    }
+    if (s->stringsCancel) {
+        s->stringsCancel->store(true);
+    }
+    s->stringsAllRows.clear();
+    s->stringsVisible.clear();
+    if (s->stringsFilterRunning) {
+        s->stringsFilterRunning = false;
+        KillTimer(s->hwnd, kTimerStringsFilterWork);
+    }
+    ListView_SetItemCountEx(s->pageStrings, 0, LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
+    UpdateStringsDetail(s);
+ 
+
+    auto* cancel = new std::atomic<bool>(false);
+    s->stringsCancel = cancel;
+    struct Payload { HWND hwnd; std::wstring file; std::atomic<bool>* cancel; };
+    auto* payload = new Payload{s->hwnd, s->currentFile, cancel};
+    uintptr_t th = _beginthreadex(nullptr, 0, StringsThreadProc, payload, 0, nullptr);
+    if (th == 0) {
+        delete payload;
+        if (s->stringsCancel == cancel) {
+            s->stringsCancel = nullptr;
+        }
+        delete cancel;
+        MessageBoxError(s->hwnd, L"\u542f\u52a8\u626b\u63cf\u7ebf\u7a0b\u5931\u8d25");
+        return;
+    }
+    CloseHandle(reinterpret_cast<HANDLE>(th));
+}
+
 static std::wstring PromptOpenFile(HWND hwnd) {
     wchar_t fileName[MAX_PATH] = {};
     OPENFILENAMEW ofn = {};
@@ -1200,6 +1612,142 @@ static std::wstring PromptOpenFile(HWND hwnd) {
         return {};
     }
     return fileName;
+}
+
+static std::wstring GetBaseNameFromPath(const std::wstring& path) {
+    size_t pos = path.find_last_of(L"\\/");
+    if (pos == std::wstring::npos) {
+        return path;
+    }
+    return path.substr(pos + 1);
+}
+
+static std::wstring PromptSaveFile(HWND hwnd, const std::wstring& defaultName, const wchar_t* filter, const wchar_t* defExt) {
+    wchar_t fileName[MAX_PATH] = {};
+    wcsncpy_s(fileName, defaultName.c_str(), _TRUNCATE);
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFile = fileName;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrFilter = filter;
+    ofn.nFilterIndex = 1;
+    ofn.lpstrDefExt = defExt;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    if (!GetSaveFileNameW(&ofn)) {
+        return {};
+    }
+    return fileName;
+}
+
+static std::vector<const GuiState::StringsRow*> GetStringsRowsForSelectionOrVisible(const GuiState* s) {
+    std::vector<const GuiState::StringsRow*> out;
+    if (!s || !s->pageStrings) {
+        return out;
+    }
+    int item = -1;
+    while (true) {
+        item = ListView_GetNextItem(s->pageStrings, item, LVNI_SELECTED);
+        if (item < 0) {
+            break;
+        }
+        if (item >= static_cast<int>(s->stringsVisible.size())) {
+            continue;
+        }
+        int idx = s->stringsVisible[static_cast<size_t>(item)];
+        if (idx < 0 || idx >= static_cast<int>(s->stringsAllRows.size())) {
+            continue;
+        }
+        out.push_back(&s->stringsAllRows[static_cast<size_t>(idx)]);
+    }
+    if (!out.empty()) {
+        return out;
+    }
+    out.reserve(s->stringsVisible.size());
+    for (int idx : s->stringsVisible) {
+        if (idx < 0 || idx >= static_cast<int>(s->stringsAllRows.size())) {
+            continue;
+        }
+        out.push_back(&s->stringsAllRows[static_cast<size_t>(idx)]);
+    }
+    return out;
+}
+
+static std::wstring BuildStringsExportText(const std::vector<const GuiState::StringsRow*>& rows) {
+    std::wostringstream out;
+    for (const auto* r : rows) {
+        if (!r) continue;
+        out << HexU64(r->fileOffset, 8) << L"  " << StringsTypeToText(r->type) << L"  len=" << r->text.size();
+        if (!r->section.empty()) {
+            out << L"  section=" << r->section;
+        }
+        if (r->rva.has_value()) {
+            out << L"  rva=" << HexU32(*r->rva, 8);
+        }
+        if (r->va.has_value()) {
+            out << L"  va=" << HexU64(*r->va, 16);
+        }
+        out << L"  " << r->text << L"\r\n";
+    }
+    return out.str();
+}
+
+static std::string JsonEscape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 16);
+    for (unsigned char ch : s) {
+        switch (ch) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (ch < 0x20) {
+                    char buf[7] = {};
+                    sprintf_s(buf, "\\u%04x", static_cast<unsigned int>(ch));
+                    out += buf;
+                } else {
+                    out.push_back(static_cast<char>(ch));
+                }
+        }
+    }
+    return out;
+}
+
+static std::string BuildStringsExportJson(const std::vector<const GuiState::StringsRow*>& rows) {
+    std::ostringstream out;
+    out << "{\n  \"strings\": [\n";
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const auto* r = rows[i];
+        if (!r) continue;
+        std::string textUtf8 = WStringToUtf8(r->text);
+        std::string secUtf8 = WStringToUtf8(r->section);
+        out << "    {";
+        out << "\"type\":\"" << (r->type == StringsHitType::Ascii ? "ascii" : "utf16le") << "\",";
+        out << "\"text\":\"" << JsonEscape(textUtf8) << "\",";
+        out << "\"length\":" << r->text.size() << ",";
+        out << "\"fileOffset\":" << r->fileOffset << ",";
+        out << "\"fileOffsetHex\":\"" << WStringToUtf8(HexU64(r->fileOffset, 8)) << "\"";
+        if (!r->section.empty()) {
+            out << ",\"section\":\"" << JsonEscape(secUtf8) << "\"";
+        }
+        if (r->rva.has_value()) {
+            out << ",\"rvaHex\":\"" << WStringToUtf8(HexU32(*r->rva, 8)) << "\"";
+        }
+        if (r->va.has_value()) {
+            out << ",\"vaHex\":\"" << WStringToUtf8(HexU64(*r->va, 16)) << "\"";
+        }
+        out << "}";
+        if (i + 1 < rows.size()) {
+            out << ",";
+        }
+        out << "\n";
+    }
+    out << "  ]\n}\n";
+    return out.str();
 }
 
 static void FitImportsDllColumns(GuiState* s) {
@@ -1319,6 +1867,32 @@ static void UpdateLayout(GuiState* s) {
     MoveWindow(s->importsFilterEdit, filterEditX, filterY, filterEditW, filterH, TRUE);
     MoveWindow(s->exportsFilterLabel, filterX, filterY, filterLabelW, filterH, TRUE);
     MoveWindow(s->exportsFilterEdit, filterEditX, filterY, filterEditW, filterH, TRUE);
+
+    int stringsBarY = pageRc.top;
+    int stringsBarH = filterH;
+    int stringsListY = pageRc.top + stringsBarH + pad;
+    int stringsListH = pageH - stringsBarH - pad;
+    if (stringsListH < MulDiv(80, static_cast<int>(s->dpi), 96)) {
+        stringsListH = MulDiv(80, static_cast<int>(s->dpi), 96);
+    }
+
+    int typeW = MulDiv(110, static_cast<int>(s->dpi), 96);
+    int minLenW = MulDiv(56, static_cast<int>(s->dpi), 96);
+    int uniqueW = MulDiv(74, static_cast<int>(s->dpi), 96);
+    int stringsBarGap = pad;
+    int stringsSearchW = pageW - (typeW + stringsBarGap + minLenW + stringsBarGap + uniqueW + stringsBarGap);
+    if (stringsSearchW < MulDiv(120, static_cast<int>(s->dpi), 96)) {
+        stringsSearchW = MulDiv(120, static_cast<int>(s->dpi), 96);
+    }
+    int stringsSearchX = pageRc.left;
+    int stringsTypeX = stringsSearchX + stringsSearchW + stringsBarGap;
+    int stringsMinLenX = stringsTypeX + typeW + stringsBarGap;
+    int stringsUniqueX = stringsMinLenX + minLenW + stringsBarGap;
+
+    MoveWindow(s->stringsSearchEdit, stringsSearchX, stringsBarY, stringsSearchW, stringsBarH, TRUE);
+    MoveWindow(s->stringsTypeCombo, stringsTypeX, stringsBarY, typeW, stringsBarH, TRUE);
+    MoveWindow(s->stringsMinLenEdit, stringsMinLenX, stringsBarY, minLenW, stringsBarH, TRUE);
+    MoveWindow(s->stringsUniqueCheck, stringsUniqueX, stringsBarY, uniqueW, stringsBarH, TRUE);
     int importsY = pageRc.top + filterH + pad;
     int importsH = pageH - filterH - pad;
     int splitGap = pad;
@@ -1338,6 +1912,7 @@ static void UpdateLayout(GuiState* s) {
     InvalidateRect(s->pageImportsDlls, nullptr, TRUE);
     InvalidateRect(s->pageImports, nullptr, TRUE);
     MoveWindow(s->pageExports, pageRc.left, importsY, pageW, importsH, TRUE);
+    MoveWindow(s->pageStrings, pageRc.left, stringsListY, pageW, stringsListH, TRUE);
     MoveWindow(s->pageResources, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pagePdb, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pageSignature, pageRc.left, pageRc.top, pageW, pageH, TRUE);
@@ -1423,6 +1998,7 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->pageImportsDlls,
         s->pageImports,
         s->pageExports,
+        s->pageStrings,
         s->pageResources,
         s->pagePdb,
         s->pageSignature,
@@ -1431,6 +2007,10 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->importsFilterEdit,
         s->exportsFilterLabel,
         s->exportsFilterEdit,
+        s->stringsSearchEdit,
+        s->stringsTypeCombo,
+        s->stringsMinLenEdit,
+        s->stringsUniqueCheck,
     };
     for (HWND hwnd : controls) {
         if (hwnd) {
@@ -1452,6 +2032,7 @@ static void ApplyUiFontAndTheme(GuiState* s) {
     SetWindowTheme(s->pageImportsDlls, L"Explorer", nullptr);
     SetWindowTheme(s->pageImports, L"Explorer", nullptr);
     SetWindowTheme(s->pageExports, L"Explorer", nullptr);
+    SetWindowTheme(s->pageStrings, L"Explorer", nullptr);
 
     int editMargin = MulDiv(8, static_cast<int>(s->dpi), 96);
     SendMessageW(s->pageSummary, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
@@ -1465,6 +2046,7 @@ static void ApplyUiFontAndTheme(GuiState* s) {
     ListView_SetExtendedListViewStyleEx(s->pageImportsDlls, ex, ex);
     ListView_SetExtendedListViewStyleEx(s->pageImports, ex, ex);
     ListView_SetExtendedListViewStyleEx(s->pageExports, ex, ex);
+    ListView_SetExtendedListViewStyleEx(s->pageStrings, ex, ex);
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -1531,6 +2113,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Imports), &ti);
             ti.pszText = const_cast<wchar_t*>(L"Exports");
             TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Exports), &ti);
+            ti.pszText = const_cast<wchar_t*>(L"Strings");
+            TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Strings), &ti);
             ti.pszText = const_cast<wchar_t*>(L"Resources");
             TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Resources), &ti);
             ti.pszText = const_cast<wchar_t*>(L"Debug/PDB");
@@ -1552,6 +2136,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->pageImportsDlls = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS_DLLS), nullptr, nullptr);
             s->pageImports = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS), nullptr, nullptr);
             s->pageExports = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS), nullptr, nullptr);
+            s->pageStrings = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle | LVS_OWNERDATA, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS), nullptr, nullptr);
 
             DWORD filterLabelStyle = WS_CHILD | SS_CENTER | SS_CENTERIMAGE;
             s->importsFilterLabel = CreateWindowW(L"STATIC", L"\uE721", filterLabelStyle, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
@@ -1559,6 +2144,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->importsFilterEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", filterEditStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS_FILTER), nullptr, nullptr);
             s->exportsFilterLabel = CreateWindowW(L"STATIC", L"\uE721", filterLabelStyle, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
             s->exportsFilterEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", filterEditStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS_FILTER), nullptr, nullptr);
+
+            s->stringsSearchEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", filterEditStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_SEARCH), nullptr, nullptr);
+            DWORD comboStyle = WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL;
+            s->stringsTypeCombo = CreateWindowW(WC_COMBOBOXW, L"", comboStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_TYPE), nullptr, nullptr);
+            DWORD minLenStyle = WS_CHILD | ES_LEFT | ES_AUTOHSCROLL | ES_NUMBER;
+            s->stringsMinLenEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"4", minLenStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_MINLEN), nullptr, nullptr);
+            DWORD chkStyle = WS_CHILD | BS_AUTOCHECKBOX;
+            s->stringsUniqueCheck = CreateWindowW(L"BUTTON", L"\u53bb\u91cd", chkStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_UNIQUE), nullptr, nullptr);
 
             auto colW = [&](int base) { return MulDiv(base, static_cast<int>(s->dpi), 96); };
             AddListViewColumn(s->pageSections, 0, colW(140), L"Name");
@@ -1577,6 +2170,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             AddListViewColumn(s->pageExports, 0, colW(100), L"Ordinal");
             AddListViewColumn(s->pageExports, 1, colW(120), L"RVA");
             AddListViewColumn(s->pageExports, 2, colW(380), L"Name");
+
+            AddListViewColumn(s->pageStrings, 0, colW(120), L"Offset");
+            AddListViewColumn(s->pageStrings, 1, colW(120), L"Section");
+            AddListViewColumn(s->pageStrings, 2, colW(90), L"Type");
+            AddListViewColumn(s->pageStrings, 3, colW(70), L"Len");
+            AddListViewColumn(s->pageStrings, 4, colW(520), L"Text");
+
+            SendMessageW(s->stringsTypeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"All"));
+            SendMessageW(s->stringsTypeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"ASCII"));
+            SendMessageW(s->stringsTypeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"UTF-16LE"));
+            SendMessageW(s->stringsTypeCombo, CB_SETCURSEL, 0, 0);
+            SendMessageW(s->stringsUniqueCheck, BM_SETCHECK, BST_CHECKED, 0);
 
             ApplyUiFontAndTheme(s);
             ShowOnlyTab(s, TabIndex::Summary);
@@ -1644,9 +2249,84 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     }
                     return 0;
                 }
+                case IDC_STRINGS_SEARCH:
+                case IDC_STRINGS_MINLEN: {
+                    if (HIWORD(wParam) == EN_CHANGE) {
+                        SetTimer(hwnd, kTimerStringsFilter, 200, nullptr);
+                    }
+                    return 0;
+                }
+                case IDC_STRINGS_TYPE: {
+                    if (HIWORD(wParam) == CBN_SELCHANGE) {
+                        ApplyStringsFilterNow(s);
+                    }
+                    return 0;
+                }
+                case IDC_STRINGS_UNIQUE: {
+                    ApplyStringsFilterNow(s);
+                    return 0;
+                }
+                case IDM_STRINGS_COPY_TEXT: {
+                    auto idx = GetSelectedStringsRowIndex(s);
+                    if (idx.has_value() && *idx >= 0 && *idx < static_cast<int>(s->stringsAllRows.size())) {
+                        CopyTextToClipboard(hwnd, s->stringsAllRows[static_cast<size_t>(*idx)].text);
+                    }
+                    return 0;
+                }
+                case IDM_STRINGS_COPY_LINE: {
+                    auto idx = GetSelectedStringsRowIndex(s);
+                    if (idx.has_value() && *idx >= 0 && *idx < static_cast<int>(s->stringsAllRows.size())) {
+                        const auto& r = s->stringsAllRows[static_cast<size_t>(*idx)];
+                        std::wstring line = BuildStringsExportText({&r});
+                        CopyTextToClipboard(hwnd, line);
+                    }
+                    return 0;
+                }
+                case IDM_STRINGS_COPY_DETAIL: {
+                    auto idx = GetSelectedStringsRowIndex(s);
+                    if (idx.has_value() && *idx >= 0 && *idx < static_cast<int>(s->stringsAllRows.size())) {
+                        const auto& r = s->stringsAllRows[static_cast<size_t>(*idx)];
+                        std::wstring text = FormatStringsDetailLine(r) + L"\r\n" + r.text;
+                        CopyTextToClipboard(hwnd, text);
+                    }
+                    return 0;
+                }
+                case IDM_STRINGS_EXPORT_TEXT:
+                case IDM_STRINGS_EXPORT_JSON: {
+                    auto rows = GetStringsRowsForSelectionOrVisible(s);
+                    if (rows.empty()) {
+                        return 0;
+                    }
+                    std::wstring base = GetBaseNameFromPath(s->currentFile);
+                    std::wstring defaultName = base + (LOWORD(wParam) == IDM_STRINGS_EXPORT_JSON ? L".strings.json" : L".strings.txt");
+                    if (LOWORD(wParam) == IDM_STRINGS_EXPORT_JSON) {
+                        std::wstring outPath = PromptSaveFile(hwnd, defaultName, L"JSON Files (*.json)\0*.json\0All Files (*.*)\0*.*\0", L"json");
+                        if (outPath.empty()) {
+                            return 0;
+                        }
+                        std::string json = BuildStringsExportJson(rows);
+                        if (!WriteAllBytes(outPath, json)) {
+                            MessageBoxError(hwnd, L"\u5199\u5165\u5931\u8d25");
+                        }
+                        return 0;
+                    }
+                    std::wstring outPath = PromptSaveFile(hwnd, defaultName, L"Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0", L"txt");
+                    if (outPath.empty()) {
+                        return 0;
+                    }
+                    std::wstring text = BuildStringsExportText(rows);
+                    std::string bytes = WStringToUtf8(text);
+                    if (!WriteAllBytes(outPath, bytes)) {
+                        MessageBoxError(hwnd, L"\u5199\u5165\u5931\u8d25");
+                    }
+                    return 0;
+                }
                 case VK_ESCAPE: {
                     if (s->busy && s->analysisCancel) {
                         s->analysisCancel->store(true);
+                    }
+                    if (s->stringsCancel) {
+                        s->stringsCancel->store(true);
                     }
                     return 0;
                 }
@@ -1662,9 +2342,52 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 if (s->busy && s->analysisCancel) {
                     s->analysisCancel->store(true);
                 }
+                if (s->stringsCancel) {
+                    s->stringsCancel->store(true);
+                }
                 return 0;
             }
             break;
+        }
+        case WM_CONTEXTMENU: {
+            HWND src = reinterpret_cast<HWND>(wParam);
+            if (src != s->pageStrings) {
+                break;
+            }
+            POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            if (pt.x != -1 && pt.y != -1) {
+                POINT clientPt = pt;
+                ScreenToClient(s->pageStrings, &clientPt);
+                LVHITTESTINFO ht = {};
+                ht.pt = clientPt;
+                int hit = ListView_SubItemHitTest(s->pageStrings, &ht);
+                if (hit >= 0) {
+                    ListView_SetItemState(s->pageStrings, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+                    ListView_SetItemState(s->pageStrings, hit, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+                }
+            } else {
+                int sel = ListView_GetNextItem(s->pageStrings, -1, LVNI_SELECTED);
+                if (sel >= 0) {
+                    RECT rc = {};
+                    ListView_GetItemRect(s->pageStrings, sel, &rc, LVIR_BOUNDS);
+                    POINT p = {rc.left, rc.bottom};
+                    ClientToScreen(s->pageStrings, &p);
+                    pt = p;
+                } else {
+                    GetCursorPos(&pt);
+                }
+            }
+
+            HMENU menu = CreatePopupMenu();
+            AppendMenuW(menu, MF_STRING, IDM_STRINGS_COPY_TEXT, L"\u590d\u5236\u6587\u672c");
+            AppendMenuW(menu, MF_STRING, IDM_STRINGS_COPY_LINE, L"\u590d\u5236\u884c");
+            AppendMenuW(menu, MF_STRING, IDM_STRINGS_COPY_DETAIL, L"\u590d\u5236\u8be6\u60c5");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING, IDM_STRINGS_EXPORT_TEXT, L"\u5bfc\u51fa Text...");
+            AppendMenuW(menu, MF_STRING, IDM_STRINGS_EXPORT_JSON, L"\u5bfc\u51fa JSON...");
+            TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+            DestroyMenu(menu);
+            return 0;
         }
         case WM_TIMER: {
             if (wParam == kTimerImportsFilter) {
@@ -1677,6 +2400,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 ApplyExportsFilterNow(s);
                 return 0;
             }
+            if (wParam == kTimerStringsFilter) {
+                KillTimer(hwnd, kTimerStringsFilter);
+                ApplyStringsFilterNow(s);
+                return 0;
+            }
+            if (wParam == kTimerStringsFilterWork) {
+                ContinueStringsFilterWork(s);
+                return 0;
+            }
             break;
         }
         case WM_NOTIFY: {
@@ -1685,6 +2417,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 int idx = TabCtrl_GetCurSel(s->tab);
                 ShowOnlyTab(s, static_cast<TabIndex>(idx));
                 UpdateLayout(s);
+                if (idx == static_cast<int>(TabIndex::Strings)) {
+                    HWND ctrls[] = {s->stringsSearchEdit, s->stringsTypeCombo, s->stringsMinLenEdit, s->stringsUniqueCheck, s->pageStrings};
+                    for (HWND c : ctrls) {
+                        if (c) {
+                            RedrawWindow(c, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW);
+                        }
+                    }
+                    RECT pageRc = GetTabPageRect(s->hwnd, s->tab);
+                    RedrawWindow(s->hwnd, &pageRc, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
+                }
                 if (idx == static_cast<int>(TabIndex::Signature)) {
                     StartVerifyIfNeeded(s, false);
                 }
@@ -1702,6 +2444,51 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     UpdateImportFunctionsForSelection(s);
                     return 0;
                 }
+            }
+            if (nm->hwndFrom == s->pageStrings && nm->code == LVN_GETDISPINFOW) {
+                auto* di = reinterpret_cast<NMLVDISPINFOW*>(lParam);
+                LVITEMW& item = di->item;
+                if (!(item.mask & LVIF_TEXT) || item.pszText == nullptr || item.cchTextMax <= 0) {
+                    return 0;
+                }
+                int viewRow = item.iItem;
+                if (viewRow < 0 || viewRow >= static_cast<int>(s->stringsVisible.size())) {
+                    item.pszText[0] = L'\0';
+                    return 0;
+                }
+                int idx = s->stringsVisible[static_cast<size_t>(viewRow)];
+                if (idx < 0 || idx >= static_cast<int>(s->stringsAllRows.size())) {
+                    item.pszText[0] = L'\0';
+                    return 0;
+                }
+                const auto& r = s->stringsAllRows[static_cast<size_t>(idx)];
+                const std::wstring* text = nullptr;
+                std::wstring dash = L"-";
+                switch (item.iSubItem) {
+                    case 0: text = &r.fileOffsetHex; break;
+                    case 1: text = r.section.empty() ? &dash : &r.section; break;
+                    case 2: text = &r.typeText; break;
+                    case 3: text = &r.lenText; break;
+                    case 4: text = &r.text; break;
+                    default: break;
+                }
+                if (text) {
+                    lstrcpynW(item.pszText, text->c_str(), item.cchTextMax);
+                } else {
+                    item.pszText[0] = L'\0';
+                }
+                return 0;
+            }
+            if (nm->hwndFrom == s->pageStrings && nm->code == LVN_ITEMCHANGED) {
+                UpdateStringsDetail(s);
+                return 0;
+            }
+            if (nm->hwndFrom == s->pageStrings && nm->code == NM_DBLCLK) {
+                auto idx = GetSelectedStringsRowIndex(s);
+                if (idx.has_value() && *idx >= 0 && *idx < static_cast<int>(s->stringsAllRows.size())) {
+                    CopyTextToClipboard(hwnd, s->stringsAllRows[static_cast<size_t>(*idx)].text);
+                }
+                return 0;
             }
             break;
         }
@@ -1729,7 +2516,71 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             SetBusy(s, false);
             if (s->analysisCancel) { delete s->analysisCancel; s->analysisCancel = nullptr; }
             RefreshAllViews(s);
+            StartStringsScan(s);
             delete r;
+            return 0;
+        }
+        case WM_APP_STRINGS_DONE: {
+            auto* m = reinterpret_cast<StringsResultMessage*>(lParam);
+            if (m->cancel) {
+                if (s->stringsCancel == m->cancel) {
+                    s->stringsCancel = nullptr;
+                }
+                delete m->cancel;
+            }
+            if (m->filePath != s->currentFile) {
+                delete m;
+                return 0;
+            }
+            if (!m->ok) {
+                if (m->error != L"\u5df2\u53d6\u6d88") {
+                    MessageBoxError(s->hwnd, m->error);
+                }
+                delete m;
+                return 0;
+            }
+
+            s->stringsAllRows.clear();
+            s->stringsVisible.clear();
+            if (s->stringsFilterRunning) {
+                s->stringsFilterRunning = false;
+                KillTimer(s->hwnd, kTimerStringsFilterWork);
+            }
+            ListView_SetItemCountEx(s->pageStrings, 0, LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
+
+            auto* payload = new StringsRowsBuildPayload();
+            payload->hwnd = s->hwnd;
+            payload->filePath = m->filePath;
+            payload->hits = std::move(m->hits);
+            if (s->analysis) {
+                payload->sections = s->analysis->parser.GetSectionsInfo();
+                payload->imageBase = s->analysis->parser.GetHeaderInfo().imageBase;
+            }
+
+            uintptr_t th = _beginthreadex(nullptr, 0, StringsRowsBuildThreadProc, payload, 0, nullptr);
+            if (th == 0) {
+                delete payload;
+                MessageBoxError(s->hwnd, L"\u542f\u52a8\u5904\u7406\u7ebf\u7a0b\u5931\u8d25");
+            } else {
+                CloseHandle(reinterpret_cast<HANDLE>(th));
+            }
+            delete m;
+            return 0;
+        }
+        case WM_APP_STRINGS_ROWS_DONE: {
+            auto* m = reinterpret_cast<StringsRowsResultMessage*>(lParam);
+            if (m->filePath != s->currentFile) {
+                delete m;
+                return 0;
+            }
+            if (!m->ok) {
+                MessageBoxError(s->hwnd, m->error);
+                delete m;
+                return 0;
+            }
+            s->stringsAllRows = std::move(m->rows);
+            ApplyStringsFilterNow(s);
+            delete m;
             return 0;
         }
         case WM_APP_HASH_PROGRESS: {
@@ -1780,6 +2631,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (s->analysisCancel) {
                 delete s->analysisCancel;
                 s->analysisCancel = nullptr;
+            }
+            if (s->stringsCancel) {
+                s->stringsCancel->store(true);
+                s->stringsCancel = nullptr;
             }
             PostQuitMessage(0);
             return 0;
