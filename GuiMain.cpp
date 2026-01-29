@@ -1082,19 +1082,23 @@ static void AppendSigner(std::wostringstream& out, const PESignerInfo& si) {
 
 static void PopulateSignature(HWND edit, const PEAnalysisResult& ar, bool verifying) {
     std::wostringstream out;
-    if (ar.signaturePresenceReady) {
-        out << L"Presence: " << SigPresenceToText(ar.signaturePresence) << L"\r\n";
-    } else {
-        out << L"Presence: (unknown)\r\n";
-    }
+    bool firstBlock = true;
+    auto beginBlock = [&]() {
+        if (!firstBlock) {
+            out << L"\r\n";
+        }
+        firstBlock = false;
+    };
 
     if (ar.embeddedVerify.has_value()) {
-        out << L"\r\nEmbedded:\r\n";
+        beginBlock();
+        out << L"Embedded:\r\n";
         out << L"Status: " << VerifyStatusToString(ar.embeddedVerify->status) << L" (0x" << std::hex << ar.embeddedVerify->winVerifyTrustStatus << std::dec << L")\r\n";
         AppendSigner(out, ar.embeddedVerify->signer);
     }
     if (ar.catalogVerify.has_value()) {
-        out << L"\r\nCatalog:\r\n";
+        beginBlock();
+        out << L"Catalog:\r\n";
         out << L"Status: " << VerifyStatusToString(ar.catalogVerify->status) << L" (0x" << std::hex << ar.catalogVerify->winVerifyTrustStatus << std::dec << L")\r\n";
         if (!ar.catalogVerify->catalogPath.empty()) {
             out << L"CatalogFile: " << ar.catalogVerify->catalogPath << L"\r\n";
@@ -1102,7 +1106,8 @@ static void PopulateSignature(HWND edit, const PEAnalysisResult& ar, bool verify
         AppendSigner(out, ar.catalogVerify->signer);
     }
     if (!ar.embeddedVerify.has_value() && !ar.catalogVerify.has_value()) {
-        out << L"\r\n\u9a8c\u8bc1\uff1a" << (verifying ? L"\u8fdb\u884c\u4e2d..." : L"\u672a\u6267\u884c") << L"\r\n";
+        beginBlock();
+        out << L"\u9a8c\u8bc1\uff1a" << (verifying ? L"\u8fdb\u884c\u4e2d..." : L"\u672a\u6267\u884c") << L"\r\n";
     }
     SetWindowTextWString(edit, out.str());
 }
