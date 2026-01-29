@@ -7,6 +7,7 @@
 #include "ReportUtil.h"
 #include "ShellContextMenu.h"
 #include "StringsScanner.h"
+#include "StringsSearchHistory.h"
 
 #include <commctrl.h>
 #include <commdlg.h>
@@ -22,6 +23,7 @@
 #include <cwctype>
 #include <map>
 #include <memory>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -40,6 +42,7 @@ static const UINT_PTR kTimerImportsFilter = 1;
 static const UINT_PTR kTimerExportsFilter = 2;
 static const UINT_PTR kTimerStringsFilter = 3;
 static const UINT_PTR kTimerStringsFilterWork = 4;
+static const UINT_PTR kTimerStringsHistorySave = 5;
 static const WPARAM IDM_SYS_SETTINGS = 0x1FF0;
 static const WPARAM IDM_SYS_CANCEL = 0x1FF2;
 
@@ -71,7 +74,18 @@ enum : UINT {
     IDC_STRINGS_MINLEN = 2203,
     IDC_STRINGS_UNIQUE = 2204,
     IDC_STRINGS_DETAIL = 2205,
-    IDC_STRINGS_COPYDETAIL = 2206
+    IDC_STRINGS_COPYDETAIL = 2206,
+    IDC_STRINGS_REGEX = 2207,
+    IDC_STRINGS_HISTORY_CLEAR = 2208,
+    IDC_STRINGS_HISTORY_MORE = 2209,
+    IDC_STRINGS_HISTORY_TAG0 = 2210,
+    IDC_STRINGS_HISTORY_TAG1 = 2211,
+    IDC_STRINGS_HISTORY_TAG2 = 2212,
+    IDC_STRINGS_HISTORY_TAG3 = 2213,
+    IDC_STRINGS_HISTORY_TAG4 = 2214,
+    IDC_STRINGS_HISTORY_TAG5 = 2215,
+    IDC_STRINGS_HISTORY_TAG6 = 2216,
+    IDC_STRINGS_HISTORY_TAG7 = 2217
 };
 
 enum class TabIndex : int {
@@ -91,7 +105,13 @@ enum : UINT {
     IDM_STRINGS_COPY_LINE = 41002,
     IDM_STRINGS_COPY_DETAIL = 41003,
     IDM_STRINGS_EXPORT_TEXT = 41004,
-    IDM_STRINGS_EXPORT_JSON = 41005
+    IDM_STRINGS_EXPORT_JSON = 41005,
+    IDM_STRINGS_HISTORY_CLEAR_UNPINNED = 41010,
+    IDM_STRINGS_HISTORY_CLEAR_ALL = 41011,
+    IDM_STRINGS_HISTORY_PIN = 41012,
+    IDM_STRINGS_HISTORY_UNPIN = 41013,
+    IDM_STRINGS_HISTORY_DELETE = 41014,
+    IDM_STRINGS_HISTORY_MORE_BASE = 41100
 };
 
 struct VerifyResultMessage {
@@ -140,13 +160,19 @@ struct GuiState {
     HWND exportsFilterEdit = nullptr;
     HWND stringsSearchLabel = nullptr;
     HWND stringsSearchEdit = nullptr;
+    HWND stringsRegexCheck = nullptr;
     HWND stringsTypeLabel = nullptr;
     HWND stringsTypeCombo = nullptr;
     HWND stringsMinLenLabel = nullptr;
     HWND stringsMinLenEdit = nullptr;
     HWND stringsUniqueCheck = nullptr;
+    HWND stringsHistoryLabel = nullptr;
+    HWND stringsHistoryClearBtn = nullptr;
+    HWND stringsHistoryMoreBtn = nullptr;
+    HWND stringsHistoryTags[8] = {};
 
     HBRUSH bgBrush = nullptr;
+    HBRUSH regexErrorBrush = nullptr;
 
     bool busy = false;
     bool verifyInFlight = false;
@@ -200,8 +226,19 @@ struct GuiState {
     int stringsFilterMinLen = 4;
     int stringsFilterType = 0;
     bool stringsFilterUnique = true;
+    bool stringsFilterUseRegex = false;
+    bool stringsFilterRegexValid = true;
+    std::wstring stringsFilterRegexPattern;
+    std::wregex stringsFilterRegex;
     std::vector<int> stringsFilterResult;
     std::unordered_set<std::wstring_view> stringsFilterSeen;
+
+    StringsSearchHistory stringsHistory;
+    bool stringsHistoryDirty = false;
+    std::vector<StringsSearchHistoryEntry> stringsHistoryDisplay;
+    std::vector<StringsSearchHistoryEntry> stringsHistoryMoreEntries;
+    int stringsHistoryContextTag = -1;
+    int stringsHistoryMaxTagsVisible = 8;
 
     std::atomic<bool>* analysisCancel = nullptr;
     std::atomic<bool>* stringsCancel = nullptr;
@@ -227,6 +264,7 @@ static UINT GetBestWindowDpi(HWND hwnd);
 static HFONT CreateUiFontForDpi(UINT dpi);
 static void FitImportsDllColumns(GuiState* s);
 static void FitImportsFuncColumns(GuiState* s);
+static void ApplyStringsFilterNow(GuiState* s);
 
 static void CenterWindowOnWorkArea(HWND hwnd) {
     if (!hwnd) {
@@ -631,6 +669,70 @@ static bool IsStringsUniqueEnabled(const GuiState* s) {
     return SendMessageW(s->stringsUniqueCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
 }
 
+static bool IsStringsRegexEnabled(const GuiState* s) {
+    if (!s || !s->stringsRegexCheck) {
+        return false;
+    }
+    return SendMessageW(s->stringsRegexCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+}
+
+static std::wstring BuildStringsHistoryTagText(const StringsSearchHistoryEntry& e) {
+    std::wstring text;
+    if (e.pinned) {
+        text += L"\u2605";
+    }
+    if (e.mode == StringsSearchMode::Regex) {
+        text += L"re:";
+    }
+    text += e.query;
+    return text;
+}
+
+static void UpdateStringsHistoryBar(GuiState* s) {
+    if (!s || !s->stringsHistoryLabel || !s->stringsHistoryMoreBtn || !s->stringsHistoryClearBtn) {
+        return;
+    }
+    if (!IsWindowVisible(s->stringsSearchEdit)) {
+        return;
+    }
+    s->stringsHistoryDisplay = s->stringsHistory.ListForDisplay();
+    int maxVisible = s->stringsHistoryMaxTagsVisible;
+    if (maxVisible < 0) maxVisible = 0;
+    if (maxVisible > 8) maxVisible = 8;
+    size_t shown = std::min<size_t>(static_cast<size_t>(maxVisible), s->stringsHistoryDisplay.size());
+    for (int i = 0; i < 8; ++i) {
+        if (static_cast<size_t>(i) < shown) {
+            const auto& e = s->stringsHistoryDisplay[static_cast<size_t>(i)];
+            SetWindowTextWString(s->stringsHistoryTags[i], BuildStringsHistoryTagText(e));
+            ShowWindow(s->stringsHistoryTags[i], SW_SHOW);
+        } else {
+            ShowWindow(s->stringsHistoryTags[i], SW_HIDE);
+        }
+    }
+    bool hasMore = s->stringsHistoryDisplay.size() > shown;
+    ShowWindow(s->stringsHistoryMoreBtn, hasMore ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->stringsHistoryClearBtn, (!s->stringsHistoryDisplay.empty()) ? SW_SHOW : SW_HIDE);
+    s->stringsHistoryMoreEntries.clear();
+    if (hasMore) {
+        s->stringsHistoryMoreEntries.assign(s->stringsHistoryDisplay.begin() + static_cast<ptrdiff_t>(shown), s->stringsHistoryDisplay.end());
+    }
+}
+
+static void ApplyStringsHistoryEntry(GuiState* s, const StringsSearchHistoryEntry& e) {
+    if (!s) {
+        return;
+    }
+    SetWindowTextWString(s->stringsSearchEdit, e.query);
+    SendMessageW(s->stringsRegexCheck, BM_SETCHECK, (e.mode == StringsSearchMode::Regex) ? BST_CHECKED : BST_UNCHECKED, 0);
+    int typeIdx = e.typeFilter;
+    if (typeIdx < 0) typeIdx = 0;
+    if (typeIdx > 2) typeIdx = 2;
+    SendMessageW(s->stringsTypeCombo, CB_SETCURSEL, typeIdx, 0);
+    SetWindowTextWString(s->stringsMinLenEdit, std::to_wstring(e.minLen));
+    SendMessageW(s->stringsUniqueCheck, BM_SETCHECK, e.unique ? BST_CHECKED : BST_UNCHECKED, 0);
+    ApplyStringsFilterNow(s);
+}
+
 static std::optional<int> GetSelectedStringsRowIndex(const GuiState* s) {
     if (!s || !s->pageStrings) {
         return std::nullopt;
@@ -680,13 +782,54 @@ static void ApplyStringsFilterNow(GuiState* s) {
     s->stringsFilterResult.clear();
     s->stringsFilterSeen.clear();
 
-    std::wstring qLower = ToLowerString(GetControlText(s->stringsSearchEdit));
-    s->stringsFilterTokens = TokenizeQueryLower(qLower);
+    std::wstring qRaw = GetControlText(s->stringsSearchEdit);
+    bool useRegex = IsStringsRegexEnabled(s);
+    s->stringsFilterUseRegex = useRegex;
+    s->stringsFilterRegexValid = true;
+    s->stringsFilterRegexPattern.clear();
+    if (useRegex) {
+        if (!qRaw.empty()) {
+            try {
+                s->stringsFilterRegex = std::wregex(qRaw, std::regex_constants::ECMAScript | std::regex_constants::icase);
+                s->stringsFilterRegexPattern = qRaw;
+            } catch (...) {
+                s->stringsFilterRegexValid = false;
+            }
+        }
+        s->stringsFilterTokens.clear();
+        if (!s->stringsFilterRegexValid) {
+            s->stringsFilterRunning = false;
+            InvalidateRect(s->stringsSearchEdit, nullptr, TRUE);
+            return;
+        }
+    } else {
+        std::wstring qLower = ToLowerString(qRaw);
+        s->stringsFilterTokens = TokenizeQueryLower(qLower);
+    }
     s->stringsFilterMinLen = GetStringsMinLenClamped(s);
     s->stringsFilterType = GetStringsTypeFilterIndex(s);
     s->stringsFilterUnique = IsStringsUniqueEnabled(s);
     if (s->stringsFilterUnique) {
         s->stringsFilterSeen.reserve(std::min<size_t>(s->stringsAllRows.size(), 250000));
+    }
+
+    int nonSpace = 0;
+    for (wchar_t ch : qRaw) {
+        if (!iswspace(ch)) {
+            ++nonSpace;
+        }
+    }
+    if (nonSpace >= 2) {
+        StringsSearchHistoryEntry he;
+        he.mode = useRegex ? StringsSearchMode::Regex : StringsSearchMode::Plain;
+        he.query = qRaw;
+        he.typeFilter = s->stringsFilterType;
+        he.minLen = s->stringsFilterMinLen;
+        he.unique = s->stringsFilterUnique;
+        s->stringsHistory.Record(he);
+        s->stringsHistoryDirty = true;
+        SetTimer(s->hwnd, kTimerStringsHistorySave, 1000, nullptr);
+        UpdateStringsHistoryBar(s);
     }
 
     s->stringsVisible.clear();
@@ -714,9 +857,21 @@ static void ContinueStringsFilterWork(GuiState* s) {
         if (s->stringsFilterType == 2 && r.type != StringsHitType::Utf16Le) {
             goto next_item;
         }
-        for (const auto& t : s->stringsFilterTokens) {
-            if (r.haystackLower.find(t) == std::wstring::npos) {
-                goto next_item;
+        if (s->stringsFilterUseRegex) {
+            if (!s->stringsFilterRegexPattern.empty()) {
+                try {
+                    if (!std::regex_search(r.text, s->stringsFilterRegex)) {
+                        goto next_item;
+                    }
+                } catch (...) {
+                    goto next_item;
+                }
+            }
+        } else {
+            for (const auto& t : s->stringsFilterTokens) {
+                if (r.haystackLower.find(t) == std::wstring::npos) {
+                    goto next_item;
+                }
             }
         }
         if (s->stringsFilterUnique) {
@@ -1277,11 +1432,20 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
     bool showStringsControls = (idx == TabIndex::Strings);
     ShowWindow(s->stringsSearchLabel, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsSearchEdit, showStringsControls ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->stringsRegexCheck, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsTypeLabel, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsTypeCombo, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsMinLenLabel, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsMinLenEdit, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsUniqueCheck, showStringsControls ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->stringsHistoryLabel, showStringsControls ? SW_SHOW : SW_HIDE);
+    if (!showStringsControls) {
+        for (HWND h : s->stringsHistoryTags) {
+            ShowWindow(h, SW_HIDE);
+        }
+        ShowWindow(s->stringsHistoryMoreBtn, SW_HIDE);
+        ShowWindow(s->stringsHistoryClearBtn, SW_HIDE);
+    }
     if (showImportsFilter) {
         FitImportsDllColumns(s);
         FitImportsFuncColumns(s);
@@ -1289,6 +1453,7 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
         InvalidateRect(s->pageImports, nullptr, TRUE);
     }
     if (showStringsControls) {
+        UpdateStringsHistoryBar(s);
         if (s->stringsVisible.empty() && !s->stringsAllRows.empty()) {
             ApplyStringsFilterNow(s);
         } else {
@@ -1884,8 +2049,11 @@ static void UpdateLayout(GuiState* s) {
 
     int stringsBarY = pageRc.top;
     int stringsBarH = filterH;
-    int stringsListY = pageRc.top + stringsBarH + pad;
-    int stringsListH = pageH - stringsBarH - pad;
+    int stringsHistoryGapY = MulDiv(6, static_cast<int>(s->dpi), 96);
+    int stringsHistoryY = stringsBarY + stringsBarH + stringsHistoryGapY;
+    int stringsHistoryH = filterH;
+    int stringsListY = stringsHistoryY + stringsHistoryH + pad;
+    int stringsListH = pageH - (stringsBarH + stringsHistoryGapY + stringsHistoryH + pad);
     if (stringsListH < MulDiv(80, static_cast<int>(s->dpi), 96)) {
         stringsListH = MulDiv(80, static_cast<int>(s->dpi), 96);
     }
@@ -1897,8 +2065,10 @@ static void UpdateLayout(GuiState* s) {
     int typeW = MulDiv(110, static_cast<int>(s->dpi), 96);
     int minLenW = MulDiv(56, static_cast<int>(s->dpi), 96);
     int uniqueW = MulDiv(74, static_cast<int>(s->dpi), 96);
+    int regexW = MulDiv(70, static_cast<int>(s->dpi), 96);
     int stringsBarGap = pad;
     int fixedW = stringsIconW + stringsBarGap +
+                 regexW + stringsBarGap +
                  typeLabelW + labelGap + typeW + stringsBarGap +
                  minLenLabelW + labelGap + minLenW + stringsBarGap +
                  uniqueW;
@@ -1909,7 +2079,8 @@ static void UpdateLayout(GuiState* s) {
     int stringsSearchX = pageRc.left;
     int stringsIconX = stringsSearchX;
     int stringsSearchEditX = stringsIconX + stringsIconW + stringsBarGap;
-    int stringsTypeLabelX = stringsSearchEditX + stringsSearchW + stringsBarGap;
+    int stringsRegexX = stringsSearchEditX + stringsSearchW + stringsBarGap;
+    int stringsTypeLabelX = stringsRegexX + regexW + stringsBarGap;
     int stringsTypeComboX = stringsTypeLabelX + typeLabelW + labelGap;
     int stringsMinLenLabelX = stringsTypeComboX + typeW + stringsBarGap;
     int stringsMinLenEditX = stringsMinLenLabelX + minLenLabelW + labelGap;
@@ -1917,11 +2088,41 @@ static void UpdateLayout(GuiState* s) {
 
     MoveWindow(s->stringsSearchLabel, stringsIconX, stringsBarY, stringsIconW, stringsBarH, TRUE);
     MoveWindow(s->stringsSearchEdit, stringsSearchEditX, stringsBarY, stringsSearchW, stringsBarH, TRUE);
+    MoveWindow(s->stringsRegexCheck, stringsRegexX, stringsBarY, regexW, stringsBarH, TRUE);
     MoveWindow(s->stringsTypeLabel, stringsTypeLabelX, stringsBarY, typeLabelW, stringsBarH, TRUE);
     MoveWindow(s->stringsTypeCombo, stringsTypeComboX, stringsBarY, typeW, stringsBarH, TRUE);
     MoveWindow(s->stringsMinLenLabel, stringsMinLenLabelX, stringsBarY, minLenLabelW, stringsBarH, TRUE);
     MoveWindow(s->stringsMinLenEdit, stringsMinLenEditX, stringsBarY, minLenW, stringsBarH, TRUE);
     MoveWindow(s->stringsUniqueCheck, stringsUniqueX, stringsBarY, uniqueW, stringsBarH, TRUE);
+
+    int historyGap = MulDiv(6, static_cast<int>(s->dpi), 96);
+    int historyLabelW = MulDiv(46, static_cast<int>(s->dpi), 96);
+    int historyClearW = MulDiv(64, static_cast<int>(s->dpi), 96);
+    int historyMoreW = MulDiv(76, static_cast<int>(s->dpi), 96);
+    int historyLabelX = pageRc.left;
+    int historyLabelY = stringsHistoryY;
+    int historyRightX = pageRc.left + pageW;
+    int historyClearX = historyRightX - historyClearW;
+    int historyMoreX = historyClearX - historyGap - historyMoreW;
+    int historyTagsX = historyLabelX + historyLabelW + historyGap;
+    int historyTagsW = historyMoreX - historyGap - historyTagsX;
+    int historyTagW = MulDiv(120, static_cast<int>(s->dpi), 96);
+    int historyTagGap = historyGap;
+    int maxFit = 0;
+    if (historyTagsW > 0) {
+        maxFit = (historyTagsW + historyTagGap) / (historyTagW + historyTagGap);
+        if (maxFit < 0) maxFit = 0;
+        if (maxFit > 8) maxFit = 8;
+    }
+    s->stringsHistoryMaxTagsVisible = maxFit;
+
+    MoveWindow(s->stringsHistoryLabel, historyLabelX, historyLabelY, historyLabelW, stringsHistoryH, TRUE);
+    MoveWindow(s->stringsHistoryMoreBtn, historyMoreX, historyLabelY, historyMoreW, stringsHistoryH, TRUE);
+    MoveWindow(s->stringsHistoryClearBtn, historyClearX, historyLabelY, historyClearW, stringsHistoryH, TRUE);
+    for (int i = 0; i < 8; ++i) {
+        int x = historyTagsX + i * (historyTagW + historyTagGap);
+        MoveWindow(s->stringsHistoryTags[i], x, historyLabelY, historyTagW, stringsHistoryH, TRUE);
+    }
     int importsY = pageRc.top + filterH + pad;
     int importsH = pageH - filterH - pad;
     int splitGap = pad;
@@ -2038,13 +2239,22 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->exportsFilterEdit,
         s->stringsSearchLabel,
         s->stringsSearchEdit,
+        s->stringsRegexCheck,
         s->stringsTypeLabel,
         s->stringsTypeCombo,
         s->stringsMinLenLabel,
         s->stringsMinLenEdit,
         s->stringsUniqueCheck,
+        s->stringsHistoryLabel,
+        s->stringsHistoryMoreBtn,
+        s->stringsHistoryClearBtn,
     };
     for (HWND hwnd : controls) {
+        if (hwnd) {
+            SendMessageW(hwnd, WM_SETFONT, reinterpret_cast<WPARAM>(s->uiFont), TRUE);
+        }
+    }
+    for (HWND hwnd : s->stringsHistoryTags) {
         if (hwnd) {
             SendMessageW(hwnd, WM_SETFONT, reinterpret_cast<WPARAM>(s->uiFont), TRUE);
         }
@@ -2105,6 +2315,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->uiFont = CreateUiFontForDpi(s->dpi);
             s->iconFont = CreateIconFontForDpi(s->dpi);
             s->bgBrush = CreateSolidBrush(GetSysColor(COLOR_WINDOW));
+            s->regexErrorBrush = CreateSolidBrush(RGB(255, 235, 238));
 
             s->btnSettingsGear = CreateWindowW(L"BUTTON", L"\xE713", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_SETTINGS_GEAR), nullptr, nullptr);
 
@@ -2183,6 +2394,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             s->stringsSearchLabel = CreateWindowW(L"STATIC", L"\uE721", filterLabelStyle, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
             s->stringsSearchEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", filterEditStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_SEARCH), nullptr, nullptr);
+            s->stringsRegexCheck = CreateWindowW(L"BUTTON", L"\u6b63\u5219", WS_CHILD | BS_AUTOCHECKBOX, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_REGEX), nullptr, nullptr);
             s->stringsTypeLabel = CreateWindowW(L"STATIC", L"\u7c7b\u578b\uff1a", WS_CHILD | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
             DWORD comboStyle = WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL;
             s->stringsTypeCombo = CreateWindowExW(WS_EX_STATICEDGE, WC_COMBOBOXW, L"", comboStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_TYPE), nullptr, nullptr);
@@ -2191,6 +2403,19 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->stringsMinLenEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"4", minLenStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_MINLEN), nullptr, nullptr);
             DWORD chkStyle = WS_CHILD | BS_AUTOCHECKBOX;
             s->stringsUniqueCheck = CreateWindowW(L"BUTTON", L"\u53bb\u91cd", chkStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_UNIQUE), nullptr, nullptr);
+
+            s->stringsHistoryLabel = CreateWindowW(L"STATIC", L"\u5386\u53f2\uff1a", WS_CHILD | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
+            s->stringsHistoryMoreBtn = CreateWindowW(L"BUTTON", L"\u66f4\u591a...", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_MORE), nullptr, nullptr);
+            s->stringsHistoryClearBtn = CreateWindowW(L"BUTTON", L"\u6e05\u7a7a", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_CLEAR), nullptr, nullptr);
+            DWORD tagStyle = WS_CHILD | BS_PUSHBUTTON;
+            s->stringsHistoryTags[0] = CreateWindowW(L"BUTTON", L"", tagStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_TAG0), nullptr, nullptr);
+            s->stringsHistoryTags[1] = CreateWindowW(L"BUTTON", L"", tagStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_TAG1), nullptr, nullptr);
+            s->stringsHistoryTags[2] = CreateWindowW(L"BUTTON", L"", tagStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_TAG2), nullptr, nullptr);
+            s->stringsHistoryTags[3] = CreateWindowW(L"BUTTON", L"", tagStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_TAG3), nullptr, nullptr);
+            s->stringsHistoryTags[4] = CreateWindowW(L"BUTTON", L"", tagStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_TAG4), nullptr, nullptr);
+            s->stringsHistoryTags[5] = CreateWindowW(L"BUTTON", L"", tagStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_TAG5), nullptr, nullptr);
+            s->stringsHistoryTags[6] = CreateWindowW(L"BUTTON", L"", tagStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_TAG6), nullptr, nullptr);
+            s->stringsHistoryTags[7] = CreateWindowW(L"BUTTON", L"", tagStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_TAG7), nullptr, nullptr);
 
             auto colW = [&](int base) { return MulDiv(base, static_cast<int>(s->dpi), 96); };
             AddListViewColumn(s->pageSections, 0, colW(140), L"Name");
@@ -2222,10 +2447,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             SendMessageW(s->stringsTypeCombo, CB_SETCURSEL, 0, 0);
             SendMessageW(s->stringsUniqueCheck, BM_SETCHECK, BST_CHECKED, 0);
 
+            s->stringsHistory.Load();
+
             ApplyUiFontAndTheme(s);
             ShowOnlyTab(s, TabIndex::Summary);
             SetBusy(s, false);
             RefreshAllViews(s);
+            UpdateStringsHistoryBar(s);
             UpdateLayout(s);
             if (!s->pendingFile.empty()) {
                 std::wstring path = s->pendingFile;
@@ -2239,7 +2467,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 break;
             }
             HWND ctrl = reinterpret_cast<HWND>(lParam);
-            if (ctrl != s->stringsUniqueCheck) {
+            if (ctrl != s->stringsUniqueCheck && ctrl != s->stringsRegexCheck) {
                 break;
             }
             HDC dc = reinterpret_cast<HDC>(wParam);
@@ -2255,7 +2483,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 ctrl != s->exportsFilterLabel &&
                 ctrl != s->stringsSearchLabel &&
                 ctrl != s->stringsTypeLabel &&
-                ctrl != s->stringsMinLenLabel) {
+                ctrl != s->stringsMinLenLabel &&
+                ctrl != s->stringsHistoryLabel) {
                 break;
             }
             HDC dc = reinterpret_cast<HDC>(wParam);
@@ -2263,8 +2492,19 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
             return reinterpret_cast<INT_PTR>(s->bgBrush);
         }
+        case WM_CTLCOLOREDIT: {
+            HWND ctrl = reinterpret_cast<HWND>(lParam);
+            if (ctrl == s->stringsSearchEdit && s->stringsFilterUseRegex && !s->stringsFilterRegexValid && s->regexErrorBrush) {
+                HDC dc = reinterpret_cast<HDC>(wParam);
+                SetTextColor(dc, RGB(183, 28, 28));
+                SetBkColor(dc, RGB(255, 235, 238));
+                return reinterpret_cast<INT_PTR>(s->regexErrorBrush);
+            }
+            break;
+        }
         case WM_SIZE: {
             UpdateLayout(s);
+            UpdateStringsHistoryBar(s);
             return 0;
         }
         case WM_DPICHANGED: {
@@ -2289,6 +2529,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->iconFont = CreateIconFontForDpi(s->dpi);
             ApplyUiFontAndTheme(s);
             UpdateLayout(s);
+            UpdateStringsHistoryBar(s);
             return 0;
         }
         case WM_COMMAND: {
@@ -2330,8 +2571,89 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     }
                     return 0;
                 }
+                case IDC_STRINGS_REGEX: {
+                    ApplyStringsFilterNow(s);
+                    return 0;
+                }
                 case IDC_STRINGS_UNIQUE: {
                     ApplyStringsFilterNow(s);
+                    return 0;
+                }
+                case IDC_STRINGS_HISTORY_TAG0:
+                case IDC_STRINGS_HISTORY_TAG1:
+                case IDC_STRINGS_HISTORY_TAG2:
+                case IDC_STRINGS_HISTORY_TAG3:
+                case IDC_STRINGS_HISTORY_TAG4:
+                case IDC_STRINGS_HISTORY_TAG5:
+                case IDC_STRINGS_HISTORY_TAG6:
+                case IDC_STRINGS_HISTORY_TAG7: {
+                    int idx = static_cast<int>(LOWORD(wParam)) - static_cast<int>(IDC_STRINGS_HISTORY_TAG0);
+                    if (idx >= 0 && static_cast<size_t>(idx) < s->stringsHistoryDisplay.size()) {
+                        ApplyStringsHistoryEntry(s, s->stringsHistoryDisplay[static_cast<size_t>(idx)]);
+                    }
+                    return 0;
+                }
+                case IDC_STRINGS_HISTORY_MORE: {
+                    if (!s->stringsHistoryMoreEntries.empty()) {
+                        RECT rc = {};
+                        GetWindowRect(s->stringsHistoryMoreBtn, &rc);
+                        POINT pt = {rc.left, rc.bottom};
+                        HMENU menu = CreatePopupMenu();
+                        for (size_t i = 0; i < s->stringsHistoryMoreEntries.size(); ++i) {
+                            UINT id = IDM_STRINGS_HISTORY_MORE_BASE + static_cast<UINT>(i);
+                            std::wstring text = BuildStringsHistoryTagText(s->stringsHistoryMoreEntries[i]);
+                            AppendMenuW(menu, MF_STRING, id, text.c_str());
+                        }
+                        TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+                        DestroyMenu(menu);
+                    }
+                    return 0;
+                }
+                case IDC_STRINGS_HISTORY_CLEAR: {
+                    RECT rc = {};
+                    GetWindowRect(s->stringsHistoryClearBtn, &rc);
+                    POINT pt = {rc.left, rc.bottom};
+                    HMENU menu = CreatePopupMenu();
+                    AppendMenuW(menu, MF_STRING, IDM_STRINGS_HISTORY_CLEAR_UNPINNED, L"\u6e05\u7a7a\u672a\u9501\u5b9a");
+                    AppendMenuW(menu, MF_STRING, IDM_STRINGS_HISTORY_CLEAR_ALL, L"\u6e05\u7a7a\u5168\u90e8(\u542b\u9501\u5b9a)");
+                    TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+                    DestroyMenu(menu);
+                    return 0;
+                }
+                case IDM_STRINGS_HISTORY_CLEAR_UNPINNED: {
+                    KillTimer(hwnd, kTimerStringsHistorySave);
+                    s->stringsHistory.Clear(false);
+                    s->stringsHistory.Save();
+                    s->stringsHistoryDirty = false;
+                    UpdateStringsHistoryBar(s);
+                    return 0;
+                }
+                case IDM_STRINGS_HISTORY_CLEAR_ALL: {
+                    KillTimer(hwnd, kTimerStringsHistorySave);
+                    s->stringsHistory.Clear(true);
+                    s->stringsHistory.Save();
+                    s->stringsHistoryDirty = false;
+                    UpdateStringsHistoryBar(s);
+                    return 0;
+                }
+                case IDM_STRINGS_HISTORY_PIN:
+                case IDM_STRINGS_HISTORY_UNPIN:
+                case IDM_STRINGS_HISTORY_DELETE: {
+                    int idx = s->stringsHistoryContextTag;
+                    if (idx >= 0 && static_cast<size_t>(idx) < s->stringsHistoryDisplay.size()) {
+                        const auto& e = s->stringsHistoryDisplay[static_cast<size_t>(idx)];
+                        if (LOWORD(wParam) == IDM_STRINGS_HISTORY_DELETE) {
+                            s->stringsHistory.Delete(e);
+                        } else {
+                            bool pin = (LOWORD(wParam) == IDM_STRINGS_HISTORY_PIN);
+                            s->stringsHistory.SetPinned(e, pin);
+                        }
+                        KillTimer(hwnd, kTimerStringsHistorySave);
+                        s->stringsHistory.Save();
+                        s->stringsHistoryDirty = false;
+                        s->stringsHistoryContextTag = -1;
+                        UpdateStringsHistoryBar(s);
+                    }
                     return 0;
                 }
                 case IDM_STRINGS_COPY_TEXT: {
@@ -2398,6 +2720,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     }
                     return 0;
                 }
+                default: {
+                    UINT id = LOWORD(wParam);
+                    if (id >= IDM_STRINGS_HISTORY_MORE_BASE && !s->stringsHistoryMoreEntries.empty()) {
+                        size_t i = static_cast<size_t>(id - IDM_STRINGS_HISTORY_MORE_BASE);
+                        if (i < s->stringsHistoryMoreEntries.size()) {
+                            ApplyStringsHistoryEntry(s, s->stringsHistoryMoreEntries[i]);
+                            return 0;
+                        }
+                    }
+                    break;
+                }
             }
             break;
         }
@@ -2419,6 +2752,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
         case WM_CONTEXTMENU: {
             HWND src = reinterpret_cast<HWND>(wParam);
+            for (int i = 0; i < 8; ++i) {
+                if (src == s->stringsHistoryTags[i]) {
+                    s->stringsHistoryContextTag = i;
+                    POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                    if (pt.x == -1 && pt.y == -1) {
+                        RECT rc = {};
+                        GetWindowRect(src, &rc);
+                        pt.x = rc.left;
+                        pt.y = rc.bottom;
+                    }
+                    HMENU menu = CreatePopupMenu();
+                    bool pinned = false;
+                    if (static_cast<size_t>(i) < s->stringsHistoryDisplay.size()) {
+                        pinned = s->stringsHistoryDisplay[static_cast<size_t>(i)].pinned;
+                    }
+                    AppendMenuW(menu, MF_STRING, pinned ? IDM_STRINGS_HISTORY_UNPIN : IDM_STRINGS_HISTORY_PIN, pinned ? L"\u53d6\u6d88\u9501\u5b9a" : L"\u9501\u5b9a");
+                    AppendMenuW(menu, MF_STRING, IDM_STRINGS_HISTORY_DELETE, L"\u5220\u9664");
+                    TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+                    DestroyMenu(menu);
+                    return 0;
+                }
+            }
             if (src != s->pageStrings) {
                 break;
             }
@@ -2477,6 +2832,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 ContinueStringsFilterWork(s);
                 return 0;
             }
+            if (wParam == kTimerStringsHistorySave) {
+                KillTimer(hwnd, kTimerStringsHistorySave);
+                if (s->stringsHistoryDirty) {
+                    s->stringsHistory.Save();
+                    s->stringsHistoryDirty = false;
+                }
+                return 0;
+            }
             break;
         }
         case WM_NOTIFY: {
@@ -2485,9 +2848,23 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 int idx = TabCtrl_GetCurSel(s->tab);
                 ShowOnlyTab(s, static_cast<TabIndex>(idx));
                 UpdateLayout(s);
+                UpdateStringsHistoryBar(s);
                 if (idx == static_cast<int>(TabIndex::Strings)) {
-                    HWND ctrls[] = {s->stringsSearchEdit, s->stringsTypeCombo, s->stringsMinLenEdit, s->stringsUniqueCheck, s->pageStrings};
+                    HWND ctrls[] = {s->stringsSearchEdit,
+                                    s->stringsRegexCheck,
+                                    s->stringsTypeCombo,
+                                    s->stringsMinLenEdit,
+                                    s->stringsUniqueCheck,
+                                    s->stringsHistoryLabel,
+                                    s->stringsHistoryMoreBtn,
+                                    s->stringsHistoryClearBtn,
+                                    s->pageStrings};
                     for (HWND c : ctrls) {
+                        if (c) {
+                            RedrawWindow(c, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW);
+                        }
+                    }
+                    for (HWND c : s->stringsHistoryTags) {
                         if (c) {
                             RedrawWindow(c, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW);
                         }
@@ -2684,6 +3061,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
         case WM_DESTROY: {
+            KillTimer(hwnd, kTimerStringsHistorySave);
+            if (s->stringsHistoryDirty) {
+                s->stringsHistory.Save();
+                s->stringsHistoryDirty = false;
+            }
             if (s->iconOpen) {
                 DestroyIcon(s->iconOpen);
                 s->iconOpen = nullptr;
@@ -2691,6 +3073,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (s->bgBrush) {
                 DeleteObject(s->bgBrush);
                 s->bgBrush = nullptr;
+            }
+            if (s->regexErrorBrush) {
+                DeleteObject(s->regexErrorBrush);
+                s->regexErrorBrush = nullptr;
             }
             if (s->iconFont) {
                 DeleteObject(s->iconFont);
