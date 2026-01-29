@@ -8,6 +8,7 @@
 #include "ShellContextMenu.h"
 #include "StringsScanner.h"
 #include "StringsSearchHistory.h"
+#include "PdbFileInfo.h"
 
 #include <commctrl.h>
 #include <commdlg.h>
@@ -239,6 +240,10 @@ struct GuiState {
     std::vector<StringsSearchHistoryEntry> stringsHistoryMoreEntries;
     int stringsHistoryContextTag = -1;
     int stringsHistoryMaxTagsVisible = 8;
+
+    std::wstring droppedPdbPath;
+    std::optional<PdbFileInfo> droppedPdbInfo;
+    std::wstring droppedPdbError;
 
     std::atomic<bool>* analysisCancel = nullptr;
     std::atomic<bool>* stringsCancel = nullptr;
@@ -937,14 +942,110 @@ static void UpdateImportFunctionsForSelection(GuiState* s) {
     PopulateImportFunctions(s->pageImports, funcs);
 }
 
-static void PopulatePdb(HWND edit, const std::optional<PEPdbInfo>& pdb) {
+static std::wstring BasenameW(const std::wstring& path) {
+    size_t pos = path.find_last_of(L"\\/");
+    if (pos == std::wstring::npos) {
+        return path;
+    }
+    return path.substr(pos + 1);
+}
+
+static std::wstring BuildPdbSymbolKey(const GUID& guid, DWORD age) {
+    std::wstring guidStr = ToWStringUtf8BestEffort(FormatGuidLower(guid));
+    std::wstring guidNoDashUpper;
+    guidNoDashUpper.reserve(guidStr.size());
+    for (wchar_t ch : guidStr) {
+        if (ch == L'-') {
+            continue;
+        }
+        guidNoDashUpper.push_back(static_cast<wchar_t>(towupper(ch)));
+    }
     std::wostringstream out;
-    if (pdb.has_value() && pdb->hasRsds) {
-        out << L"GUID: " << ToWStringUtf8BestEffort(FormatGuidLower(pdb->guid)) << L"\r\n";
-        out << L"Age: " << pdb->age << L"\r\n";
-        out << L"Path: " << ToWStringUtf8BestEffort(pdb->pdbPath) << L"\r\n";
+    out << guidNoDashUpper;
+    out << std::hex << std::nouppercase;
+    out << age;
+    return out.str();
+}
+
+static std::wstring FormatAgeDecHex(DWORD age) {
+    std::wostringstream out;
+    out << age << L" (0x" << std::hex << std::nouppercase << age << L")";
+    return out.str();
+}
+
+static void PopulatePdb(HWND edit, const GuiState* s) {
+    std::wostringstream out;
+
+    out << L"\u628a .pdb \u6587\u4ef6\u62d6\u5230\u7a97\u53e3\u91cc\uff0c\u5373\u53ef\u6838\u5bf9\u5b83\u662f\u5426\u5339\u914d\u5f53\u524d\u6587\u4ef6\u3002\r\n";
+    out << L"\r\n";
+
+    std::wstring verdict = L"\u5c1a\u672a\u6821\u9a8c\uff08\u62d6\u5165\u4e00\u4e2a PDB \u5f00\u59cb\uff09";
+    if (!s || s->analysis == nullptr) {
+        verdict = L"\u65e0\u6cd5\u6821\u9a8c\uff08\u8bf7\u5148\u6253\u5f00\u4e00\u4e2a EXE/DLL/SYS\uff09";
+    } else if (!s->analysis->pdb.has_value() || !s->analysis->pdb->hasRsds) {
+        if (!s->droppedPdbPath.empty()) {
+            verdict = L"\u65e0\u6cd5\u5224\u65ad\uff08\u5f53\u524d\u6587\u4ef6\u4e0d\u5305\u542b RSDS \u8c03\u8bd5\u6807\u8bc6\uff09";
+        } else {
+            verdict = L"\u5c1a\u672a\u6821\u9a8c\uff08\u8be5\u6587\u4ef6\u4e0d\u5305\u542b RSDS\uff09";
+        }
+    } else if (!s->droppedPdbPath.empty()) {
+        if (!s->droppedPdbError.empty()) {
+            verdict = L"\u65e0\u6cd5\u6821\u9a8c\uff08PDB \u89e3\u6790\u5931\u8d25\uff09";
+        } else if (s->droppedPdbInfo.has_value()) {
+            const auto& pe = *s->analysis->pdb;
+            const auto& pdb = *s->droppedPdbInfo;
+            if (pe.guid == pdb.guid && pe.age == pdb.age) {
+                verdict = L"\u5339\u914d";
+            } else if (pe.guid != pdb.guid) {
+                verdict = L"\u4e0d\u5339\u914d\uff08GUID \u4e0d\u540c\uff09";
+            } else {
+                verdict = L"\u4e0d\u5339\u914d\uff08Age \u4e0d\u540c\uff09";
+            }
+        }
+    }
+
+    out << L"\u7ed3\u8bba: " << verdict << L"\r\n";
+    out << L"\r\n";
+
+    out << L"\u2500\u2500 \u5f53\u524d\u6587\u4ef6\uff08PE\uff0cRSDS\uff09 \u2500\u2500\r\n";
+    if (!s || s->analysis == nullptr) {
+        out << L"(none)\r\n";
+    } else if (s->analysis->pdb.has_value() && s->analysis->pdb->hasRsds) {
+        const auto& pe = *s->analysis->pdb;
+        std::wstring pePdbPath = ToWStringUtf8BestEffort(pe.pdbPath);
+        std::wstring pePdbName = BasenameW(pePdbPath);
+        out << L"GUID: " << ToWStringUtf8BestEffort(FormatGuidLower(pe.guid)) << L"\r\n";
+        out << L"Age: " << FormatAgeDecHex(pe.age) << L"\r\n";
+        out << L"Path: " << pePdbPath << L"\r\n";
+        std::wstring key = BuildPdbSymbolKey(pe.guid, pe.age);
+        out << L"Symbol key: " << key << L"\r\n";
+        if (!pePdbName.empty()) {
+            out << L"Symbol path: " << pePdbName << L"\\" << key << L"\\" << pePdbName << L"\r\n";
+        }
     } else {
         out << L"(none)\r\n";
+    }
+
+    out << L"\r\n";
+    out << L"\u2500\u2500 \u6700\u8fd1\u62d6\u5165\u7684 PDB \u2500\u2500\r\n";
+    if (!s || s->droppedPdbPath.empty()) {
+        out << L"(none)\r\n";
+    } else {
+        out << L"Path: " << s->droppedPdbPath << L"\r\n";
+        if (!s->droppedPdbError.empty()) {
+            out << L"Error: " << s->droppedPdbError << L"\r\n";
+        } else if (s->droppedPdbInfo.has_value()) {
+            const auto& pdb = *s->droppedPdbInfo;
+            out << L"GUID: " << ToWStringUtf8BestEffort(FormatGuidLower(pdb.guid)) << L"\r\n";
+            out << L"Age: " << FormatAgeDecHex(pdb.age) << L"\r\n";
+            std::wstring key = BuildPdbSymbolKey(pdb.guid, pdb.age);
+            out << L"Symbol key: " << key << L"\r\n";
+            if (!pdb.fileName.empty()) {
+                out << L"Symbol path: " << pdb.fileName << L"\\" << key << L"\\" << pdb.fileName << L"\r\n";
+            }
+        } else {
+            out << L"(none)\r\n";
+        }
     }
     SetWindowTextWString(edit, out.str());
 }
@@ -1499,7 +1600,7 @@ static void RefreshAllViews(GuiState* s) {
             KillTimer(s->hwnd, kTimerStringsFilterWork);
         }
         SetWindowTextWString(s->pageResources, hint);
-        SetWindowTextWString(s->pagePdb, L"");
+        PopulatePdb(s->pagePdb, s);
         SetWindowTextWString(s->pageSignature, L"");
         SetWindowTextWString(s->pageHash, L"");
         UpdateFileInfo(s);
@@ -1514,7 +1615,7 @@ static void RefreshAllViews(GuiState* s) {
     BuildExportRowsFromParser(s->exportsAllRows, s->analysis->parser);
     ApplyExportsFilterNow(s);
     PopulateResources(s->pageResources, s->analysis->parser);
-    PopulatePdb(s->pagePdb, s->analysis->pdb);
+    PopulatePdb(s->pagePdb, s);
     PopulateSignature(s->pageSignature, *s->analysis, IsVerifyInFlightForCurrent(s));
     PopulateHash(s->pageHash, s->analysis->hashes);
     UpdateFileInfo(s);
@@ -1713,6 +1814,9 @@ static void StartAnalysis(GuiState* s, const std::wstring& filePath) {
     s->currentFile = filePath;
     s->analysis.reset();
     s->hashProgressPercent = -1;
+    s->droppedPdbPath.clear();
+    s->droppedPdbInfo.reset();
+    s->droppedPdbError.clear();
     if (s->stringsCancel) {
         s->stringsCancel->store(true);
     }
@@ -2944,9 +3048,35 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
         case WM_DROPFILES: {
             HDROP drop = reinterpret_cast<HDROP>(wParam);
-            wchar_t path[MAX_PATH] = {};
-            if (DragQueryFileW(drop, 0, path, MAX_PATH)) {
-                StartAnalysis(s, path);
+            UINT files = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+            if (files > 0) {
+                UINT len = DragQueryFileW(drop, 0, nullptr, 0);
+                std::wstring path(static_cast<size_t>(len + 1), L'\0');
+                DragQueryFileW(drop, 0, path.data(), len + 1);
+                path.resize(wcslen(path.c_str()));
+
+                std::wstring lower = ToLowerString(path);
+                bool isPdb = lower.size() >= 4 && lower.substr(lower.size() - 4) == L".pdb";
+                if (isPdb) {
+                    s->droppedPdbPath = path;
+                    s->droppedPdbInfo.reset();
+                    s->droppedPdbError.clear();
+
+                    PdbFileInfo info = {};
+                    std::wstring err;
+                    if (ReadPdbFileInfo(path, info, err)) {
+                        s->droppedPdbInfo = std::move(info);
+                    } else {
+                        s->droppedPdbError = err.empty() ? L"\u89e3\u6790 PDB \u5931\u8d25" : err;
+                    }
+
+                    TabCtrl_SetCurSel(s->tab, static_cast<int>(TabIndex::DebugPdb));
+                    ShowOnlyTab(s, TabIndex::DebugPdb);
+                    UpdateLayout(s);
+                    RefreshAllViews(s);
+                } else {
+                    StartAnalysis(s, path);
+                }
             }
             DragFinish(drop);
             return 0;

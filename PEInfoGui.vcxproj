@@ -163,6 +163,7 @@
     <ClInclude Include="targetver.h" />
     <ClInclude Include="HashCalculator.h" />
     <ClInclude Include="PEDebugInfo.h" />
+    <ClInclude Include="PdbFileInfo.h" />
     <ClInclude Include="PEParser.h" />
     <ClInclude Include="PEResource.h" />
     <ClInclude Include="PESignature.h" />
@@ -185,6 +186,7 @@
     <ClCompile Include="GuiMain.cpp" />
     <ClCompile Include="HashCalculator.cpp" />
     <ClCompile Include="PEDebugInfo.cpp" />
+    <ClCompile Include="PdbFileInfo.cpp" />
     <ClCompile Include="PEParser.cpp" />
     <ClCompile Include="PEResource.cpp" />
     <ClCompile Include="PESignature.cpp" />
