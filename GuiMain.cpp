@@ -138,10 +138,15 @@ struct GuiState {
     HWND importsFilterEdit = nullptr;
     HWND exportsFilterLabel = nullptr;
     HWND exportsFilterEdit = nullptr;
+    HWND stringsSearchLabel = nullptr;
     HWND stringsSearchEdit = nullptr;
+    HWND stringsTypeLabel = nullptr;
     HWND stringsTypeCombo = nullptr;
+    HWND stringsMinLenLabel = nullptr;
     HWND stringsMinLenEdit = nullptr;
     HWND stringsUniqueCheck = nullptr;
+
+    HBRUSH bgBrush = nullptr;
 
     bool busy = false;
     bool verifyInFlight = false;
@@ -1270,8 +1275,11 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
     ShowWindow(s->exportsFilterLabel, showExportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->exportsFilterEdit, showExportsFilter ? SW_SHOW : SW_HIDE);
     bool showStringsControls = (idx == TabIndex::Strings);
+    ShowWindow(s->stringsSearchLabel, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsSearchEdit, showStringsControls ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->stringsTypeLabel, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsTypeCombo, showStringsControls ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->stringsMinLenLabel, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsMinLenEdit, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsUniqueCheck, showStringsControls ? SW_SHOW : SW_HIDE);
     if (showImportsFilter) {
@@ -1882,22 +1890,37 @@ static void UpdateLayout(GuiState* s) {
         stringsListH = MulDiv(80, static_cast<int>(s->dpi), 96);
     }
 
+    int stringsIconW = filterLabelW;
+    int typeLabelW = MulDiv(46, static_cast<int>(s->dpi), 96);
+    int minLenLabelW = MulDiv(86, static_cast<int>(s->dpi), 96);
+    int labelGap = MulDiv(6, static_cast<int>(s->dpi), 96);
     int typeW = MulDiv(110, static_cast<int>(s->dpi), 96);
     int minLenW = MulDiv(56, static_cast<int>(s->dpi), 96);
     int uniqueW = MulDiv(74, static_cast<int>(s->dpi), 96);
     int stringsBarGap = pad;
-    int stringsSearchW = pageW - (typeW + stringsBarGap + minLenW + stringsBarGap + uniqueW + stringsBarGap);
+    int fixedW = stringsIconW + stringsBarGap +
+                 typeLabelW + labelGap + typeW + stringsBarGap +
+                 minLenLabelW + labelGap + minLenW + stringsBarGap +
+                 uniqueW;
+    int stringsSearchW = pageW - fixedW;
     if (stringsSearchW < MulDiv(120, static_cast<int>(s->dpi), 96)) {
         stringsSearchW = MulDiv(120, static_cast<int>(s->dpi), 96);
     }
     int stringsSearchX = pageRc.left;
-    int stringsTypeX = stringsSearchX + stringsSearchW + stringsBarGap;
-    int stringsMinLenX = stringsTypeX + typeW + stringsBarGap;
-    int stringsUniqueX = stringsMinLenX + minLenW + stringsBarGap;
+    int stringsIconX = stringsSearchX;
+    int stringsSearchEditX = stringsIconX + stringsIconW + stringsBarGap;
+    int stringsTypeLabelX = stringsSearchEditX + stringsSearchW + stringsBarGap;
+    int stringsTypeComboX = stringsTypeLabelX + typeLabelW + labelGap;
+    int stringsMinLenLabelX = stringsTypeComboX + typeW + stringsBarGap;
+    int stringsMinLenEditX = stringsMinLenLabelX + minLenLabelW + labelGap;
+    int stringsUniqueX = stringsMinLenEditX + minLenW + stringsBarGap;
 
-    MoveWindow(s->stringsSearchEdit, stringsSearchX, stringsBarY, stringsSearchW, stringsBarH, TRUE);
-    MoveWindow(s->stringsTypeCombo, stringsTypeX, stringsBarY, typeW, stringsBarH, TRUE);
-    MoveWindow(s->stringsMinLenEdit, stringsMinLenX, stringsBarY, minLenW, stringsBarH, TRUE);
+    MoveWindow(s->stringsSearchLabel, stringsIconX, stringsBarY, stringsIconW, stringsBarH, TRUE);
+    MoveWindow(s->stringsSearchEdit, stringsSearchEditX, stringsBarY, stringsSearchW, stringsBarH, TRUE);
+    MoveWindow(s->stringsTypeLabel, stringsTypeLabelX, stringsBarY, typeLabelW, stringsBarH, TRUE);
+    MoveWindow(s->stringsTypeCombo, stringsTypeComboX, stringsBarY, typeW, stringsBarH, TRUE);
+    MoveWindow(s->stringsMinLenLabel, stringsMinLenLabelX, stringsBarY, minLenLabelW, stringsBarH, TRUE);
+    MoveWindow(s->stringsMinLenEdit, stringsMinLenEditX, stringsBarY, minLenW, stringsBarH, TRUE);
     MoveWindow(s->stringsUniqueCheck, stringsUniqueX, stringsBarY, uniqueW, stringsBarH, TRUE);
     int importsY = pageRc.top + filterH + pad;
     int importsH = pageH - filterH - pad;
@@ -2013,8 +2036,11 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->importsFilterEdit,
         s->exportsFilterLabel,
         s->exportsFilterEdit,
+        s->stringsSearchLabel,
         s->stringsSearchEdit,
+        s->stringsTypeLabel,
         s->stringsTypeCombo,
+        s->stringsMinLenLabel,
         s->stringsMinLenEdit,
         s->stringsUniqueCheck,
     };
@@ -2031,6 +2057,9 @@ static void ApplyUiFontAndTheme(GuiState* s) {
     }
     if (s->exportsFilterLabel && s->iconFont) {
         SendMessageW(s->exportsFilterLabel, WM_SETFONT, reinterpret_cast<WPARAM>(s->iconFont), TRUE);
+    }
+    if (s->stringsSearchLabel && s->iconFont) {
+        SendMessageW(s->stringsSearchLabel, WM_SETFONT, reinterpret_cast<WPARAM>(s->iconFont), TRUE);
     }
 
     SetWindowTheme(s->tab, L"Explorer", nullptr);
@@ -2075,6 +2104,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->dpi = GetBestWindowDpi(hwnd);
             s->uiFont = CreateUiFontForDpi(s->dpi);
             s->iconFont = CreateIconFontForDpi(s->dpi);
+            s->bgBrush = CreateSolidBrush(GetSysColor(COLOR_WINDOW));
 
             s->btnSettingsGear = CreateWindowW(L"BUTTON", L"\xE713", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_SETTINGS_GEAR), nullptr, nullptr);
 
@@ -2151,10 +2181,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->exportsFilterLabel = CreateWindowW(L"STATIC", L"\uE721", filterLabelStyle, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
             s->exportsFilterEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", filterEditStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS_FILTER), nullptr, nullptr);
 
+            s->stringsSearchLabel = CreateWindowW(L"STATIC", L"\uE721", filterLabelStyle, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
             s->stringsSearchEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", filterEditStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_SEARCH), nullptr, nullptr);
+            s->stringsTypeLabel = CreateWindowW(L"STATIC", L"\u7c7b\u578b\uff1a", WS_CHILD | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
             DWORD comboStyle = WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL;
-            s->stringsTypeCombo = CreateWindowW(WC_COMBOBOXW, L"", comboStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_TYPE), nullptr, nullptr);
+            s->stringsTypeCombo = CreateWindowExW(WS_EX_STATICEDGE, WC_COMBOBOXW, L"", comboStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_TYPE), nullptr, nullptr);
             DWORD minLenStyle = WS_CHILD | ES_LEFT | ES_AUTOHSCROLL | ES_NUMBER;
+            s->stringsMinLenLabel = CreateWindowW(L"STATIC", L"\u6700\u5c0f\u957f\u5ea6\uff1a", WS_CHILD | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
             s->stringsMinLenEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"4", minLenStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_MINLEN), nullptr, nullptr);
             DWORD chkStyle = WS_CHILD | BS_AUTOCHECKBOX;
             s->stringsUniqueCheck = CreateWindowW(L"BUTTON", L"\u53bb\u91cd", chkStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_UNIQUE), nullptr, nullptr);
@@ -2179,7 +2212,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             AddListViewColumn(s->pageStrings, 0, colW(120), L"Offset");
             AddListViewColumn(s->pageStrings, 1, colW(120), L"Section");
-            AddListViewColumn(s->pageStrings, 2, colW(90), L"Type");
+            AddListViewColumn(s->pageStrings, 2, colW(90), L"\u7c7b\u578b(Type)");
             AddListViewColumn(s->pageStrings, 3, colW(70), L"Len");
             AddListViewColumn(s->pageStrings, 4, colW(520), L"Text");
 
@@ -2200,6 +2233,35 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 StartAnalysis(s, path);
             }
             return 0;
+        }
+        case WM_CTLCOLORBTN: {
+            if (!s->bgBrush) {
+                break;
+            }
+            HWND ctrl = reinterpret_cast<HWND>(lParam);
+            if (ctrl != s->stringsUniqueCheck) {
+                break;
+            }
+            HDC dc = reinterpret_cast<HDC>(wParam);
+            SetBkMode(dc, TRANSPARENT);
+            return reinterpret_cast<INT_PTR>(s->bgBrush);
+        }
+        case WM_CTLCOLORSTATIC: {
+            if (!s->bgBrush) {
+                break;
+            }
+            HWND ctrl = reinterpret_cast<HWND>(lParam);
+            if (ctrl != s->importsFilterLabel &&
+                ctrl != s->exportsFilterLabel &&
+                ctrl != s->stringsSearchLabel &&
+                ctrl != s->stringsTypeLabel &&
+                ctrl != s->stringsMinLenLabel) {
+                break;
+            }
+            HDC dc = reinterpret_cast<HDC>(wParam);
+            SetBkMode(dc, TRANSPARENT);
+            SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+            return reinterpret_cast<INT_PTR>(s->bgBrush);
         }
         case WM_SIZE: {
             UpdateLayout(s);
@@ -2625,6 +2687,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (s->iconOpen) {
                 DestroyIcon(s->iconOpen);
                 s->iconOpen = nullptr;
+            }
+            if (s->bgBrush) {
+                DeleteObject(s->bgBrush);
+                s->bgBrush = nullptr;
             }
             if (s->iconFont) {
                 DeleteObject(s->iconFont);
