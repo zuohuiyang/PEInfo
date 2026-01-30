@@ -415,7 +415,7 @@ static std::wstring BuildAboutText() {
     out << L"PEInfo\r\n\r\n";
     out << L"\u7248\u672c\uff1a v1.0.0\r\n";
     out << L"Build\uff1a " << TEXT(__DATE__) << L" " << TEXT(__TIME__) << L"\r\n";
-    out << L"\u514d\u8d23\u58f0\u660e\uff1a \u672c\u5de5\u7a0b\u7531 vibe coding \u751f\u6210\uff0c\u4f7f\u7528\u98ce\u9669\u7531\u4f7f\u7528\u8005\u81ea\u884c\u627f\u62c5\u3002\r\n";
+    out << L"\u514d\u8d23\u58f0\u660e\uff1a\u672c\u5de5\u7a0b\u7531 vibe coding \u751f\u6210\uff0c\u4f7f\u7528\u98ce\u9669\u7531\u4f7f\u7528\u8005\u81ea\u884c\u627f\u62c5\u3002\r\n";
     return out.str();
 }
 
@@ -1538,6 +1538,22 @@ static RECT GetTabPageRect(HWND hwndMain, HWND hwndTab) {
     return rc;
 }
 
+static LRESULT CALLBACK AboutPageSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR id, DWORD_PTR refData) {
+    if (msg == WM_NOTIFY) {
+        auto* s = reinterpret_cast<GuiState*>(refData);
+        auto* nm = reinterpret_cast<NMHDR*>(lParam);
+        if (s && nm && nm->hwndFrom == s->aboutLink && (nm->code == NM_CLICK || nm->code == NM_RETURN)) {
+            auto* link = reinterpret_cast<NMLINK*>(lParam);
+            ShellExecuteW(s->hwnd, L"open", link->item.szUrl, nullptr, nullptr, SW_SHOWNORMAL);
+            return 0;
+        }
+    }
+    if (msg == WM_NCDESTROY) {
+        RemoveWindowSubclass(hwnd, AboutPageSubclassProc, id);
+    }
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
 static void ShowOnlyTab(GuiState* s, TabIndex idx) {
     HWND pages[] = {s->pageSummary, s->pageSections, s->pageImports, s->pageExports, s->pageStrings, s->pageResources, s->pagePdb, s->pageSignature, s->pageHash, s->pageAbout};
     for (int i = 0; i < static_cast<int>(std::size(pages)); ++i) {
@@ -2282,13 +2298,18 @@ static void UpdateLayout(GuiState* s) {
         int agap = MulDiv(10, static_cast<int>(s->dpi), 96);
         int infoH = MulDiv(94, static_cast<int>(s->dpi), 96);
         int linkH = MulDiv(24, static_cast<int>(s->dpi), 96);
-        int textPad = MulDiv(8, static_cast<int>(s->dpi), 96);
+        int editMargin = MulDiv(8, static_cast<int>(s->dpi), 96);
         int contentW = aw - 2 * apad;
         if (contentW < MulDiv(120, static_cast<int>(s->dpi), 96)) {
             contentW = MulDiv(120, static_cast<int>(s->dpi), 96);
         }
         MoveWindow(s->aboutInfo, apad, apad, contentW, infoH, TRUE);
-        MoveWindow(s->aboutLink, apad + textPad, apad + infoH + agap, contentW - textPad, linkH, TRUE);
+        int linkX = apad + editMargin;
+        int linkW = contentW - 2 * editMargin;
+        if (linkW < MulDiv(80, static_cast<int>(s->dpi), 96)) {
+            linkW = MulDiv(80, static_cast<int>(s->dpi), 96);
+        }
+        MoveWindow(s->aboutLink, linkX, apad + infoH + agap, linkW, linkH, TRUE);
     }
 
 }
@@ -2531,6 +2552,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                          reinterpret_cast<HMENU>(IDC_ABOUT_LINK),
                                          nullptr,
                                          nullptr);
+            if (s->pageAbout) {
+                SetWindowSubclass(s->pageAbout, AboutPageSubclassProc, 1, reinterpret_cast<DWORD_PTR>(s));
+            }
 
             DWORD listStyle = WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS;
             s->pageSections = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SECTIONS), nullptr, nullptr);
