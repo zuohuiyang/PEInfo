@@ -415,6 +415,7 @@ static std::wstring BuildAboutText() {
     out << L"PEInfo\r\n\r\n";
     out << L"\u7248\u672c\uff1a v1.0.0\r\n";
     out << L"Build\uff1a " << TEXT(__DATE__) << L" " << TEXT(__TIME__) << L"\r\n";
+    out << L"\u514d\u8d23\u58f0\u660e\uff1a\u672c\u5de5\u7a0b\u7531 vibe coding \u751f\u6210\uff0c\u4f7f\u7528\u98ce\u9669\u7531\u4f7f\u7528\u8005\u81ea\u884c\u627f\u62c5\u3002\r\n";
     return out.str();
 }
 
