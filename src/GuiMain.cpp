@@ -415,7 +415,7 @@ static std::wstring BuildAboutText() {
     out << L"PEInfo\r\n\r\n";
     out << L"\u7248\u672c\uff1a v1.0.0\r\n";
     out << L"Build\uff1a " << TEXT(__DATE__) << L" " << TEXT(__TIME__) << L"\r\n";
-    out << L"\u514d\u8d23\u58f0\u660e\uff1a\u672c\u5de5\u7a0b\u7531 vibe coding \u751f\u6210\uff0c\u4f7f\u7528\u98ce\u9669\u7531\u4f7f\u7528\u8005\u81ea\u884c\u627f\u62c5\u3002\r\n";
+    out << L"\u514d\u8d23\u58f0\u660e\uff1a \u672c\u5de5\u7a0b\u7531 vibe coding \u751f\u6210\uff0c\u4f7f\u7528\u98ce\u9669\u7531\u4f7f\u7528\u8005\u81ea\u884c\u627f\u62c5\u3002\r\n";
     return out.str();
 }
 
@@ -2282,12 +2282,13 @@ static void UpdateLayout(GuiState* s) {
         int agap = MulDiv(10, static_cast<int>(s->dpi), 96);
         int infoH = MulDiv(94, static_cast<int>(s->dpi), 96);
         int linkH = MulDiv(24, static_cast<int>(s->dpi), 96);
+        int textPad = MulDiv(8, static_cast<int>(s->dpi), 96);
         int contentW = aw - 2 * apad;
         if (contentW < MulDiv(120, static_cast<int>(s->dpi), 96)) {
             contentW = MulDiv(120, static_cast<int>(s->dpi), 96);
         }
         MoveWindow(s->aboutInfo, apad, apad, contentW, infoH, TRUE);
-        MoveWindow(s->aboutLink, apad, apad + infoH + agap, contentW, linkH, TRUE);
+        MoveWindow(s->aboutLink, apad + textPad, apad + infoH + agap, contentW - textPad, linkH, TRUE);
     }
 
 }
