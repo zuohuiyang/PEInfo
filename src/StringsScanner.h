@@ -22,6 +22,7 @@ struct StringsScanOptions {
     int maxLen = 4096;
     bool scanAscii = true;
     bool scanUtf16Le = true;
+    size_t maxHits = 200000;
 };
 
 bool ScanStringsFromFile(const std::wstring& filePath,
@@ -29,5 +30,5 @@ bool ScanStringsFromFile(const std::wstring& filePath,
                          std::vector<StringsHit>& outHits,
                          std::wstring& error,
                          std::atomic<bool>* cancel = nullptr,
-                         const std::function<void(uint64_t processed, uint64_t total)>& progress = {});
-
+                         const std::function<void(uint64_t processed, uint64_t total)>& progress = {},
+                         bool* truncated = nullptr);

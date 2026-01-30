@@ -139,6 +139,8 @@ struct StringsResultMessage {
     std::atomic<bool>* cancel = nullptr;
     bool ok = true;
     std::wstring error;
+    bool truncated = false;
+    size_t hitLimit = 0;
 };
 
 struct GuiState {
@@ -1716,9 +1718,11 @@ static unsigned __stdcall StringsThreadProc(void* param) {
     opt.maxLen = 4096;
     opt.scanAscii = true;
     opt.scanUtf16Le = true;
+    opt.maxHits = 200000;
+    msg->hitLimit = opt.maxHits;
 
     std::wstring err;
-    if (!ScanStringsFromFile(filePath, opt, msg->hits, err, cancel)) {
+    if (!ScanStringsFromFile(filePath, opt, msg->hits, err, cancel, {}, &msg->truncated)) {
         msg->ok = false;
         msg->error = err.empty() ? L"\u626b\u63cf\u5931\u8d25" : err;
     } else {
@@ -3174,6 +3178,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 }
                 delete m;
                 return 0;
+            }
+            if (m->truncated && m->hitLimit > 0) {
+                std::wostringstream out;
+                out << L"\u5b57\u7b26\u4e32\u6570\u91cf\u5df2\u8fbe\u4e0a\u9650\uff0c\u4ec5\u5c55\u793a\u524d " << m->hitLimit << L" \u6761";
+                MessageBoxW(s->hwnd, out.str().c_str(), L"\u63d0\u793a", MB_OK | MB_ICONINFORMATION);
             }
 
             s->stringsAllRows.clear();

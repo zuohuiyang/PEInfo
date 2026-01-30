@@ -66,7 +66,8 @@ static bool ScanAsciiStream(HANDLE h,
                             std::vector<StringsHit>& outHits,
                             std::wstring& error,
                             std::atomic<bool>* cancel,
-                            const std::function<void(uint64_t processed, uint64_t total)>& progress) {
+                            const std::function<void(uint64_t processed, uint64_t total)>& progress,
+                            bool* truncated) {
     const DWORD kBlock = 1u << 20;
     std::vector<uint8_t> buf(kBlock);
     uint64_t fileOffset = 0;
@@ -81,6 +82,12 @@ static bool ScanAsciiStream(HANDLE h,
         if (cancel && cancel->load()) {
             error = L"\u5df2\u53d6\u6d88";
             return false;
+        }
+        if (opt.maxHits > 0 && outHits.size() >= opt.maxHits) {
+            if (truncated) {
+                *truncated = true;
+            }
+            return true;
         }
         DWORD toRead = static_cast<DWORD>(std::min<uint64_t>(kBlock, total - fileOffset));
         DWORD read = 0;
@@ -113,6 +120,12 @@ static bool ScanAsciiStream(HANDLE h,
                     cur.clear();
                 }
             }
+            if (opt.maxHits > 0 && outHits.size() >= opt.maxHits) {
+                if (truncated) {
+                    *truncated = true;
+                }
+                return true;
+            }
         }
 
         fileOffset += read;
@@ -124,6 +137,12 @@ static bool ScanAsciiStream(HANDLE h,
 
     if (inRun) {
         AppendAsciiHitIfNeeded(opt, outHits, curStart, cur);
+        if (opt.maxHits > 0 && outHits.size() >= opt.maxHits) {
+            if (truncated) {
+                *truncated = true;
+            }
+            return true;
+        }
     }
 
     if (progress) {
@@ -138,7 +157,8 @@ static bool ScanUtf16LeStream(HANDLE h,
                               std::vector<StringsHit>& outHits,
                               std::wstring& error,
                               std::atomic<bool>* cancel,
-                              const std::function<void(uint64_t processed, uint64_t total)>& progress) {
+                              const std::function<void(uint64_t processed, uint64_t total)>& progress,
+                              bool* truncated) {
     const DWORD kBlock = 1u << 20;
     std::vector<uint8_t> buf(kBlock + 1);
     uint64_t fileOffset = 0;
@@ -155,6 +175,12 @@ static bool ScanUtf16LeStream(HANDLE h,
         if (cancel && cancel->load()) {
             error = L"\u5df2\u53d6\u6d88";
             return false;
+        }
+        if (opt.maxHits > 0 && outHits.size() >= opt.maxHits) {
+            if (truncated) {
+                *truncated = true;
+            }
+            return true;
         }
         DWORD toRead = static_cast<DWORD>(std::min<uint64_t>(kBlock, total - fileOffset));
         DWORD read = 0;
@@ -191,6 +217,12 @@ static bool ScanUtf16LeStream(HANDLE h,
             }
             haveCarry = false;
             i = 1;
+            if (opt.maxHits > 0 && outHits.size() >= opt.maxHits) {
+                if (truncated) {
+                    *truncated = true;
+                }
+                return true;
+            }
         }
 
         while (i + 1 < read) {
@@ -216,6 +248,12 @@ static bool ScanUtf16LeStream(HANDLE h,
                 }
             }
             i += 2;
+            if (opt.maxHits > 0 && outHits.size() >= opt.maxHits) {
+                if (truncated) {
+                    *truncated = true;
+                }
+                return true;
+            }
         }
 
         if (i < read) {
@@ -232,6 +270,12 @@ static bool ScanUtf16LeStream(HANDLE h,
 
     if (inRun) {
         AppendUtf16HitIfNeeded(opt, outHits, curStart, cur);
+        if (opt.maxHits > 0 && outHits.size() >= opt.maxHits) {
+            if (truncated) {
+                *truncated = true;
+            }
+            return true;
+        }
     }
 
     if (progress) {
@@ -245,9 +289,13 @@ bool ScanStringsFromFile(const std::wstring& filePath,
                          std::vector<StringsHit>& outHits,
                          std::wstring& error,
                          std::atomic<bool>* cancel,
-                         const std::function<void(uint64_t processed, uint64_t total)>& progress) {
+                         const std::function<void(uint64_t processed, uint64_t total)>& progress,
+                         bool* truncated) {
     outHits.clear();
     error.clear();
+    if (truncated) {
+        *truncated = false;
+    }
 
     if (opt.minLen < 1) {
         error = L"\u53c2\u6570\u9519\u8bef";
@@ -273,10 +321,15 @@ bool ScanStringsFromFile(const std::wstring& filePath,
             error = L"\u8bfb\u53d6\u5931\u8d25";
             return false;
         }
-        ok = ScanAsciiStream(h, total, opt, outHits, error, cancel, progress);
+        ok = ScanAsciiStream(h, total, opt, outHits, error, cancel, progress, truncated);
         if (!ok) {
             CloseHandle(h);
             return false;
+        }
+        if (truncated && *truncated) {
+            CloseHandle(h);
+            std::stable_sort(outHits.begin(), outHits.end(), [](const StringsHit& a, const StringsHit& b) { return a.fileOffset < b.fileOffset; });
+            return true;
         }
     }
 
@@ -286,7 +339,7 @@ bool ScanStringsFromFile(const std::wstring& filePath,
             error = L"\u8bfb\u53d6\u5931\u8d25";
             return false;
         }
-        ok = ScanUtf16LeStream(h, total, opt, outHits, error, cancel, progress);
+        ok = ScanUtf16LeStream(h, total, opt, outHits, error, cancel, progress, truncated);
         if (!ok) {
             CloseHandle(h);
             return false;
@@ -297,4 +350,3 @@ bool ScanStringsFromFile(const std::wstring& filePath,
     std::stable_sort(outHits.begin(), outHits.end(), [](const StringsHit& a, const StringsHit& b) { return a.fileOffset < b.fileOffset; });
     return true;
 }
-
