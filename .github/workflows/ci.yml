@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [Win32, x64]
+        configuration: [Release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Build
+        run: >
+          msbuild PEInfo.sln
+          /m
+          /p:Configuration=${{ matrix.configuration }}
+          /p:Platform=${{ matrix.platform }}
+
+      - name: Package
+        shell: pwsh
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          CONFIG: ${{ matrix.configuration }}
+        run: |
+          $outDir = if ($env:PLATFORM -eq 'x64') { "x64\$env:CONFIG" } else { "$env:CONFIG" }
+          $staging = "dist\$env:PLATFORM\$env:CONFIG"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Copy-Item -LiteralPath "$outDir\PEInfo.exe" -Destination "$staging\PEInfo.exe" -Force
+          if (Test-Path -LiteralPath "$outDir\PEInfo.pdb") {
+            Copy-Item -LiteralPath "$outDir\PEInfo.pdb" -Destination "$staging\PEInfo.pdb" -Force
+          }
+          Compress-Archive -Path "$staging\*" -DestinationPath "dist\PEInfo_$($env:PLATFORM)_$($env:CONFIG).zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PEInfo_${{ matrix.platform }}_${{ matrix.configuration }}
+          path: dist/PEInfo_${{ matrix.platform }}_${{ matrix.configuration }}.zip

@@ -1,5 +1,9 @@
 # PEInfo
 
+## 免责声明（重要）
+
+本项目为纯 vibe coding 产物，生成的代码基本未系统审阅/未逐行检查；不保证正确性、安全性与可维护性。仅供学习与参考使用，使用风险自担。尤其在分析来自不可信来源的 PE 文件时，建议在隔离环境/沙箱中运行。
+
 ## 项目概述
 
 PEInfo 是一个 Windows C++ 图形界面（GUI）工具，用于分析单个 PE 文件并展示/导出结构化报告：导入/导出（含 Delay-Import）、PDB（RSDS）、时间戳展示、数字签名检测/验证，以及文件哈希（MD5/SHA1/SHA256）。核心解析与哈希逻辑模块化，可复用，符合 C++17 标准。
@@ -29,17 +33,13 @@ PEInfo 是一个 Windows C++ 图形界面（GUI）工具，用于分析单个 PE
 ### 项目结构
 ```
 petools/
-├── PEInfo.sln              # Visual Studio解决方案
-├── PEInfoGui.vcxproj       # GUI项目（输出 PEInfo.exe）
-├── GuiMain.cpp             # GUI入口
-├── ShellContextMenu.h/cpp  # 右键菜单安装/卸载
-├── PEParser.h/cpp          # PE文件解析模块
-├── PEDebugInfo.h/cpp       # Debug Directory / PDB 解析
-├── PESignature.h/cpp       # 数字签名检测/验证（embedded/catalog）
-├── HashCalculator.h/cpp    # 哈希计算模块  
-├── stdafx.h/cpp            # 预编译头文件
-├── build.bat               # 编译脚本
-└── (其余 Report* / PECore* 等为报告与通用工具代码)
+├── PEInfo.sln                  # Visual Studio 解决方案
+├── PEInfoGui.vcxproj           # GUI 项目（输出 PEInfo.exe）
+├── src/                        # 源码（PE 解析/报告/哈希/签名/GUI）
+├── res/                        # 资源文件（manifest 等）
+├── scripts/                    # 构建/打包脚本
+├── docs/                       # 设计与开发文档
+└── README.md
 ```
 
 ## 📦 编译说明
@@ -55,8 +55,8 @@ petools/
 3. 运行：`msbuild PEInfo.sln /p:Configuration=Release /p:Platform=Win32`
 
 ### 方法3：使用编译脚本
-1. 打开 "Visual Studio 开发人员命令提示符"
-2. 运行：`build.bat`
+1. 直接运行：`scripts\build.bat`
+2. 可选参数：`scripts\build.bat x64 Release`
 
 ⚠️ **注意**：需要安装 Visual Studio 2022（MSVC v143）与 Windows 10/11 SDK。
 
@@ -115,7 +115,7 @@ PEInfo 支持在程序内一键安装/卸载右键菜单项，便于从资源管
 
 ## 📚 相关文档
 
-- [工程设计总结](ENGINEERING_SUMMARY.md) - 本地开发与编译/验证要点
+- [工程设计总结](docs/ENGINEERING_SUMMARY.md) - 本地开发与编译/验证要点
 
 ## 🎯 开发状态
 
@@ -146,8 +146,6 @@ PEInfo 支持在程序内一键安装/卸载右键菜单项，便于从资源管
 - 操作系统版本
 - 测试用的PE文件（如需要）
 
----
+## 📄 License
 
-**版本**: v1.0.0  
-**开发环境**: Visual Studio 2022 + Windows SDK  
-**最后更新**: 2024年
+见 LICENSE。

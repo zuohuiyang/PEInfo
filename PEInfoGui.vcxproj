@@ -82,7 +82,7 @@
       <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
     <Manifest>
-      <AdditionalManifestFiles>PEInfoGui.manifest</AdditionalManifestFiles>
+      <AdditionalManifestFiles>res\PEInfoGui.manifest</AdditionalManifestFiles>
     </Manifest>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -104,7 +104,7 @@
       <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
     <Manifest>
-      <AdditionalManifestFiles>PEInfoGui.manifest</AdditionalManifestFiles>
+      <AdditionalManifestFiles>res\PEInfoGui.manifest</AdditionalManifestFiles>
     </Manifest>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -126,7 +126,7 @@
       <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
     <Manifest>
-      <AdditionalManifestFiles>PEInfoGui.manifest</AdditionalManifestFiles>
+      <AdditionalManifestFiles>res\PEInfoGui.manifest</AdditionalManifestFiles>
     </Manifest>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -148,7 +148,7 @@
       <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
     <Manifest>
-      <AdditionalManifestFiles>PEInfoGui.manifest</AdditionalManifestFiles>
+      <AdditionalManifestFiles>res\PEInfoGui.manifest</AdditionalManifestFiles>
     </Manifest>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -159,47 +159,49 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="stdafx.h" />
-    <ClInclude Include="targetver.h" />
-    <ClInclude Include="HashCalculator.h" />
-    <ClInclude Include="PEDebugInfo.h" />
-    <ClInclude Include="PdbFileInfo.h" />
-    <ClInclude Include="PEParser.h" />
-    <ClInclude Include="PEResource.h" />
-    <ClInclude Include="PESignature.h" />
-    <ClInclude Include="PECore.h" />
-    <ClInclude Include="ReportJsonWriter.h" />
-    <ClInclude Include="ReportTextWriter.h" />
-    <ClInclude Include="ReportTypes.h" />
-    <ClInclude Include="ReportUtil.h" />
-    <ClInclude Include="ShellContextMenu.h" />
-    <ClInclude Include="StringsScanner.h" />
-    <ClInclude Include="StringsSearchHistory.h" />
+    <ClInclude Include="src\stdafx.h" />
+    <ClInclude Include="src\targetver.h" />
+    <ClInclude Include="src\AsyncHashCalculator.h" />
+    <ClInclude Include="src\HashCalculator.h" />
+    <ClInclude Include="src\PEDebugInfo.h" />
+    <ClInclude Include="src\PdbFileInfo.h" />
+    <ClInclude Include="src\PEParser.h" />
+    <ClInclude Include="src\PEResource.h" />
+    <ClInclude Include="src\PESignature.h" />
+    <ClInclude Include="src\PECore.h" />
+    <ClInclude Include="src\ReportJsonWriter.h" />
+    <ClInclude Include="src\ReportTextWriter.h" />
+    <ClInclude Include="src\ReportTypes.h" />
+    <ClInclude Include="src\ReportUtil.h" />
+    <ClInclude Include="src\ShellContextMenu.h" />
+    <ClInclude Include="src\StringsScanner.h" />
+    <ClInclude Include="src\StringsSearchHistory.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="stdafx.cpp">
+    <ClCompile Include="src\stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="GuiMain.cpp" />
-    <ClCompile Include="HashCalculator.cpp" />
-    <ClCompile Include="PEDebugInfo.cpp" />
-    <ClCompile Include="PdbFileInfo.cpp" />
-    <ClCompile Include="PEParser.cpp" />
-    <ClCompile Include="PEResource.cpp" />
-    <ClCompile Include="PESignature.cpp" />
-    <ClCompile Include="PECore.cpp" />
-    <ClCompile Include="ReportJsonWriter.cpp" />
-    <ClCompile Include="ReportTextWriter.cpp" />
-    <ClCompile Include="ReportUtil.cpp" />
-    <ClCompile Include="ShellContextMenu.cpp" />
-    <ClCompile Include="StringsScanner.cpp" />
-    <ClCompile Include="StringsSearchHistory.cpp" />
+    <ClCompile Include="src\AsyncHashCalculator.cpp" />
+    <ClCompile Include="src\GuiMain.cpp" />
+    <ClCompile Include="src\HashCalculator.cpp" />
+    <ClCompile Include="src\PEDebugInfo.cpp" />
+    <ClCompile Include="src\PdbFileInfo.cpp" />
+    <ClCompile Include="src\PEParser.cpp" />
+    <ClCompile Include="src\PEResource.cpp" />
+    <ClCompile Include="src\PESignature.cpp" />
+    <ClCompile Include="src\PECore.cpp" />
+    <ClCompile Include="src\ReportJsonWriter.cpp" />
+    <ClCompile Include="src\ReportTextWriter.cpp" />
+    <ClCompile Include="src\ReportUtil.cpp" />
+    <ClCompile Include="src\ShellContextMenu.cpp" />
+    <ClCompile Include="src\StringsScanner.cpp" />
+    <ClCompile Include="src\StringsSearchHistory.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="PEInfoGui.manifest" />
+    <None Include="res\PEInfoGui.manifest" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

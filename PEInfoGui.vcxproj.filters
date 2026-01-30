@@ -7,91 +7,117 @@
     <Filter Include="Header Files">
       <UniqueIdentifier>{93995380-89BD-4B04-88EB-625FBE52EBFB}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4C08-8B7E-83BB121492CE}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="stdafx.h">
+    <ClInclude Include="src\stdafx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="targetver.h">
+    <ClInclude Include="src\targetver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="HashCalculator.h">
+    <ClInclude Include="src\AsyncHashCalculator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="PEDebugInfo.h">
+    <ClInclude Include="src\HashCalculator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="PdbFileInfo.h">
+    <ClInclude Include="src\PEDebugInfo.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="PEParser.h">
+    <ClInclude Include="src\PdbFileInfo.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="PESignature.h">
+    <ClInclude Include="src\PEParser.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="PECore.h">
+    <ClInclude Include="src\PEResource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ReportJsonWriter.h">
+    <ClInclude Include="src\PESignature.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ReportTextWriter.h">
+    <ClInclude Include="src\PECore.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ReportTypes.h">
+    <ClInclude Include="src\ReportJsonWriter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ReportUtil.h">
+    <ClInclude Include="src\ReportTextWriter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="StringsScanner.h">
+    <ClInclude Include="src\ReportTypes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="StringsSearchHistory.h">
+    <ClInclude Include="src\ReportUtil.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ShellContextMenu.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\StringsScanner.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\StringsSearchHistory.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="stdafx.cpp">
+    <ClCompile Include="src\stdafx.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="GuiMain.cpp">
+    <ClCompile Include="src\AsyncHashCalculator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="HashCalculator.cpp">
+    <ClCompile Include="src\GuiMain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="PEDebugInfo.cpp">
+    <ClCompile Include="src\HashCalculator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="PdbFileInfo.cpp">
+    <ClCompile Include="src\PEDebugInfo.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="PEParser.cpp">
+    <ClCompile Include="src\PdbFileInfo.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="PESignature.cpp">
+    <ClCompile Include="src\PEParser.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="PECore.cpp">
+    <ClCompile Include="src\PEResource.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ReportJsonWriter.cpp">
+    <ClCompile Include="src\PESignature.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ReportTextWriter.cpp">
+    <ClCompile Include="src\PECore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ReportUtil.cpp">
+    <ClCompile Include="src\ReportJsonWriter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="StringsScanner.cpp">
+    <ClCompile Include="src\ReportTextWriter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="StringsSearchHistory.cpp">
+    <ClCompile Include="src\ReportUtil.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\ShellContextMenu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\StringsScanner.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\StringsSearchHistory.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="res\PEInfoGui.manifest">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
 </Project>
 
