@@ -86,7 +86,10 @@ enum : UINT {
     IDC_STRINGS_HISTORY_TAG4 = 2214,
     IDC_STRINGS_HISTORY_TAG5 = 2215,
     IDC_STRINGS_HISTORY_TAG6 = 2216,
-    IDC_STRINGS_HISTORY_TAG7 = 2217
+    IDC_STRINGS_HISTORY_TAG7 = 2217,
+    IDC_ABOUT = 2011,
+    IDC_ABOUT_INFO = 2012,
+    IDC_ABOUT_LINK = 2013
 };
 
 enum class TabIndex : int {
@@ -98,7 +101,8 @@ enum class TabIndex : int {
     Resources = 5,
     DebugPdb = 6,
     Signature = 7,
-    Hash = 8
+    Hash = 8,
+    About = 9
 };
 
 enum : UINT {
@@ -155,6 +159,9 @@ struct GuiState {
     HWND pagePdb = nullptr;
     HWND pageSignature = nullptr;
     HWND pageHash = nullptr;
+    HWND pageAbout = nullptr;
+    HWND aboutInfo = nullptr;
+    HWND aboutLink = nullptr;
     HWND importsFilterLabel = nullptr;
     HWND importsFilterEdit = nullptr;
     HWND exportsFilterLabel = nullptr;
@@ -401,6 +408,14 @@ static std::wstring SigPresenceToText(const PESignaturePresence& p) {
     if (p.hasEmbedded) return L"embedded";
     if (p.hasCatalog) return L"catalog";
     return L"none";
+}
+
+static std::wstring BuildAboutText() {
+    std::wostringstream out;
+    out << L"PEInfo\r\n\r\n";
+    out << L"\u7248\u672c\uff1a v1.0.0\r\n";
+    out << L"Build\uff1a " << TEXT(__DATE__) << L" " << TEXT(__TIME__) << L"\r\n";
+    return out.str();
 }
 
 static std::wstring FormatSummaryText(const PEAnalysisResult& ar) {
@@ -1524,7 +1539,7 @@ static RECT GetTabPageRect(HWND hwndMain, HWND hwndTab) {
 }
 
 static void ShowOnlyTab(GuiState* s, TabIndex idx) {
-    HWND pages[] = {s->pageSummary, s->pageSections, s->pageImports, s->pageExports, s->pageStrings, s->pageResources, s->pagePdb, s->pageSignature, s->pageHash};
+    HWND pages[] = {s->pageSummary, s->pageSections, s->pageImports, s->pageExports, s->pageStrings, s->pageResources, s->pagePdb, s->pageSignature, s->pageHash, s->pageAbout};
     for (int i = 0; i < static_cast<int>(std::size(pages)); ++i) {
         ShowWindow(pages[i], (i == static_cast<int>(idx)) ? SW_SHOW : SW_HIDE);
     }
@@ -1583,6 +1598,7 @@ static void UpdateFileInfo(GuiState* s) {
 }
 
 static void RefreshAllViews(GuiState* s) {
+    SetWindowTextWString(s->aboutInfo, BuildAboutText());
     if (s->analysis == nullptr) {
         std::wstring hint = L"\u62d6\u62fd EXE/DLL/SYS \u5230\u7a97\u53e3\uff0c\u6216\u70b9\u51fb\u201c\u9009\u62e9\u6587\u4ef6...\u201d";
         SetWindowTextWString(s->pageSummary, hint);
@@ -2257,6 +2273,22 @@ static void UpdateLayout(GuiState* s) {
     MoveWindow(s->pageSignature, pageRc.left, pageRc.top, pageW, pageH, TRUE);
 
     MoveWindow(s->pageHash, pageRc.left, pageRc.top, pageW, pageH, TRUE);
+    MoveWindow(s->pageAbout, pageRc.left, pageRc.top, pageW, pageH, TRUE);
+    if (s->pageAbout) {
+        RECT arc = {};
+        GetClientRect(s->pageAbout, &arc);
+        int aw = arc.right - arc.left;
+        int apad = MulDiv(12, static_cast<int>(s->dpi), 96);
+        int agap = MulDiv(10, static_cast<int>(s->dpi), 96);
+        int infoH = MulDiv(94, static_cast<int>(s->dpi), 96);
+        int linkH = MulDiv(24, static_cast<int>(s->dpi), 96);
+        int contentW = aw - 2 * apad;
+        if (contentW < MulDiv(120, static_cast<int>(s->dpi), 96)) {
+            contentW = MulDiv(120, static_cast<int>(s->dpi), 96);
+        }
+        MoveWindow(s->aboutInfo, apad, apad, contentW, infoH, TRUE);
+        MoveWindow(s->aboutLink, apad, apad + infoH + agap, contentW, linkH, TRUE);
+    }
 
     int bigBtnW = MulDiv(300, static_cast<int>(s->dpi), 96);
     int bigBtnH = MulDiv(56, static_cast<int>(s->dpi), 96);
@@ -2342,6 +2374,9 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->pagePdb,
         s->pageSignature,
         s->pageHash,
+        s->pageAbout,
+        s->aboutInfo,
+        s->aboutLink,
         s->importsFilterLabel,
         s->importsFilterEdit,
         s->exportsFilterLabel,
@@ -2394,6 +2429,7 @@ static void ApplyUiFontAndTheme(GuiState* s) {
     SendMessageW(s->pagePdb, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
     SendMessageW(s->pageSignature, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
     SendMessageW(s->pageHash, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
+    SendMessageW(s->aboutInfo, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
 
     DWORD ex = LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP;
     ListView_SetExtendedListViewStyleEx(s->pageSections, ex, ex);
@@ -2479,6 +2515,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Signature), &ti);
             ti.pszText = const_cast<wchar_t*>(L"Hash");
             TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Hash), &ti);
+            ti.pszText = const_cast<wchar_t*>(L"About");
+            TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::About), &ti);
 
             DWORD editStyle = WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_READONLY;
             s->pageSummary = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SUMMARY), nullptr, nullptr);
@@ -2486,6 +2524,19 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->pagePdb = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_PDB), nullptr, nullptr);
             s->pageSignature = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SIGNATURE), nullptr, nullptr);
             s->pageHash = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", editStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_HASH), nullptr, nullptr);
+            s->pageAbout = CreateWindowExW(WS_EX_STATICEDGE, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_ABOUT), nullptr, nullptr);
+            s->aboutInfo = CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_LEFT | ES_MULTILINE | ES_READONLY, 0, 0, 0, 0, s->pageAbout, reinterpret_cast<HMENU>(IDC_ABOUT_INFO), nullptr, nullptr);
+            s->aboutLink = CreateWindowW(WC_LINK,
+                                         L"GitHub\uff1a <a href=\"https://github.com/zuohuiyang/PEInfo\">https://github.com/zuohuiyang/PEInfo</a>",
+                                         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                                         0,
+                                         0,
+                                         0,
+                                         0,
+                                         s->pageAbout,
+                                         reinterpret_cast<HMENU>(IDC_ABOUT_LINK),
+                                         nullptr,
+                                         nullptr);
 
             DWORD listStyle = WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS;
             s->pageSections = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SECTIONS), nullptr, nullptr);
@@ -2953,6 +3004,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
         case WM_NOTIFY: {
             auto* nm = reinterpret_cast<NMHDR*>(lParam);
+            if (nm->hwndFrom == s->aboutLink && (nm->code == NM_CLICK || nm->code == NM_RETURN)) {
+                auto* link = reinterpret_cast<NMLINK*>(lParam);
+                ShellExecuteW(hwnd, L"open", link->item.szUrl, nullptr, nullptr, SW_SHOWNORMAL);
+                return 0;
+            }
             if (nm->hwndFrom == s->tab && nm->code == TCN_SELCHANGE) {
                 int idx = TabCtrl_GetCurSel(s->tab);
                 ShowOnlyTab(s, static_cast<TabIndex>(idx));
@@ -3326,7 +3382,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
 
     INITCOMMONCONTROLSEX icc = {};
     icc.dwSize = sizeof(icc);
-    icc.dwICC = ICC_LISTVIEW_CLASSES | ICC_TAB_CLASSES;
+    icc.dwICC = ICC_LISTVIEW_CLASSES | ICC_TAB_CLASSES | ICC_LINK_CLASS;
     InitCommonControlsEx(&icc);
 
     GuiState state;
