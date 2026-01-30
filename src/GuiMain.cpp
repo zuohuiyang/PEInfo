@@ -77,7 +77,6 @@ enum : UINT {
     IDC_STRINGS_COPYDETAIL = 2206,
     IDC_STRINGS_REGEX = 2207,
     IDC_STRINGS_HISTORY_CLEAR = 2208,
-    IDC_STRINGS_HISTORY_MORE = 2209,
     IDC_STRINGS_HISTORY_TAG0 = 2210,
     IDC_STRINGS_HISTORY_TAG1 = 2211,
     IDC_STRINGS_HISTORY_TAG2 = 2212,
@@ -114,8 +113,7 @@ enum : UINT {
     IDM_STRINGS_HISTORY_CLEAR_ALL = 41011,
     IDM_STRINGS_HISTORY_PIN = 41012,
     IDM_STRINGS_HISTORY_UNPIN = 41013,
-    IDM_STRINGS_HISTORY_DELETE = 41014,
-    IDM_STRINGS_HISTORY_MORE_BASE = 41100
+    IDM_STRINGS_HISTORY_DELETE = 41014
 };
 
 struct VerifyResultMessage {
@@ -176,7 +174,6 @@ struct GuiState {
     HWND stringsUniqueCheck = nullptr;
     HWND stringsHistoryLabel = nullptr;
     HWND stringsHistoryClearBtn = nullptr;
-    HWND stringsHistoryMoreBtn = nullptr;
     HWND stringsHistoryTags[8] = {};
 
     HBRUSH bgBrush = nullptr;
@@ -244,7 +241,6 @@ struct GuiState {
     StringsSearchHistory stringsHistory;
     bool stringsHistoryDirty = false;
     std::vector<StringsSearchHistoryEntry> stringsHistoryDisplay;
-    std::vector<StringsSearchHistoryEntry> stringsHistoryMoreEntries;
     int stringsHistoryContextTag = -1;
     int stringsHistoryMaxTagsVisible = 8;
 
@@ -710,7 +706,7 @@ static std::wstring BuildStringsHistoryTagText(const StringsSearchHistoryEntry& 
 }
 
 static void UpdateStringsHistoryBar(GuiState* s) {
-    if (!s || !s->stringsHistoryLabel || !s->stringsHistoryMoreBtn || !s->stringsHistoryClearBtn) {
+    if (!s || !s->stringsHistoryLabel || !s->stringsHistoryClearBtn) {
         return;
     }
     if (!IsWindowVisible(s->stringsSearchEdit)) {
@@ -730,13 +726,7 @@ static void UpdateStringsHistoryBar(GuiState* s) {
             ShowWindow(s->stringsHistoryTags[i], SW_HIDE);
         }
     }
-    bool hasMore = s->stringsHistoryDisplay.size() > shown;
-    ShowWindow(s->stringsHistoryMoreBtn, hasMore ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsHistoryClearBtn, (!s->stringsHistoryDisplay.empty()) ? SW_SHOW : SW_HIDE);
-    s->stringsHistoryMoreEntries.clear();
-    if (hasMore) {
-        s->stringsHistoryMoreEntries.assign(s->stringsHistoryDisplay.begin() + static_cast<ptrdiff_t>(shown), s->stringsHistoryDisplay.end());
-    }
 }
 
 static void ApplyStringsHistoryEntry(GuiState* s, const StringsSearchHistoryEntry& e) {
@@ -1538,22 +1528,6 @@ static RECT GetTabPageRect(HWND hwndMain, HWND hwndTab) {
     return rc;
 }
 
-static LRESULT CALLBACK AboutPageSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR id, DWORD_PTR refData) {
-    if (msg == WM_NOTIFY) {
-        auto* s = reinterpret_cast<GuiState*>(refData);
-        auto* nm = reinterpret_cast<NMHDR*>(lParam);
-        if (s && nm && nm->hwndFrom == s->aboutLink && (nm->code == NM_CLICK || nm->code == NM_RETURN)) {
-            auto* link = reinterpret_cast<NMLINK*>(lParam);
-            ShellExecuteW(s->hwnd, L"open", link->item.szUrl, nullptr, nullptr, SW_SHOWNORMAL);
-            return 0;
-        }
-    }
-    if (msg == WM_NCDESTROY) {
-        RemoveWindowSubclass(hwnd, AboutPageSubclassProc, id);
-    }
-    return DefSubclassProc(hwnd, msg, wParam, lParam);
-}
-
 static void ShowOnlyTab(GuiState* s, TabIndex idx) {
     HWND pages[] = {s->pageSummary, s->pageSections, s->pageImports, s->pageExports, s->pageStrings, s->pageResources, s->pagePdb, s->pageSignature, s->pageHash, s->pageAbout};
     for (int i = 0; i < static_cast<int>(std::size(pages)); ++i) {
@@ -1580,7 +1554,6 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
         for (HWND h : s->stringsHistoryTags) {
             ShowWindow(h, SW_HIDE);
         }
-        ShowWindow(s->stringsHistoryMoreBtn, SW_HIDE);
         ShowWindow(s->stringsHistoryClearBtn, SW_HIDE);
     }
     if (showImportsFilter) {
@@ -2239,14 +2212,12 @@ static void UpdateLayout(GuiState* s) {
     int historyGap = MulDiv(6, static_cast<int>(s->dpi), 96);
     int historyLabelW = MulDiv(46, static_cast<int>(s->dpi), 96);
     int historyClearW = MulDiv(64, static_cast<int>(s->dpi), 96);
-    int historyMoreW = MulDiv(76, static_cast<int>(s->dpi), 96);
     int historyLabelX = pageRc.left;
     int historyLabelY = stringsHistoryY;
     int historyRightX = pageRc.left + pageW;
     int historyClearX = historyRightX - historyClearW;
-    int historyMoreX = historyClearX - historyGap - historyMoreW;
     int historyTagsX = historyLabelX + historyLabelW + historyGap;
-    int historyTagsW = historyMoreX - historyGap - historyTagsX;
+    int historyTagsW = historyClearX - historyGap - historyTagsX;
     int historyTagW = MulDiv(120, static_cast<int>(s->dpi), 96);
     int historyTagGap = historyGap;
     int maxFit = 0;
@@ -2258,7 +2229,6 @@ static void UpdateLayout(GuiState* s) {
     s->stringsHistoryMaxTagsVisible = maxFit;
 
     MoveWindow(s->stringsHistoryLabel, historyLabelX, historyLabelY, historyLabelW, stringsHistoryH, TRUE);
-    MoveWindow(s->stringsHistoryMoreBtn, historyMoreX, historyLabelY, historyMoreW, stringsHistoryH, TRUE);
     MoveWindow(s->stringsHistoryClearBtn, historyClearX, historyLabelY, historyClearW, stringsHistoryH, TRUE);
     for (int i = 0; i < 8; ++i) {
         int x = historyTagsX + i * (historyTagW + historyTagGap);
@@ -2298,18 +2268,12 @@ static void UpdateLayout(GuiState* s) {
         int agap = MulDiv(10, static_cast<int>(s->dpi), 96);
         int infoH = MulDiv(94, static_cast<int>(s->dpi), 96);
         int linkH = MulDiv(24, static_cast<int>(s->dpi), 96);
-        int editMargin = MulDiv(8, static_cast<int>(s->dpi), 96);
         int contentW = aw - 2 * apad;
         if (contentW < MulDiv(120, static_cast<int>(s->dpi), 96)) {
             contentW = MulDiv(120, static_cast<int>(s->dpi), 96);
         }
         MoveWindow(s->aboutInfo, apad, apad, contentW, infoH, TRUE);
-        int linkX = apad + editMargin;
-        int linkW = contentW - 2 * editMargin;
-        if (linkW < MulDiv(80, static_cast<int>(s->dpi), 96)) {
-            linkW = MulDiv(80, static_cast<int>(s->dpi), 96);
-        }
-        MoveWindow(s->aboutLink, linkX, apad + infoH + agap, linkW, linkH, TRUE);
+        MoveWindow(s->aboutLink, apad, apad + infoH + agap, contentW, linkH, TRUE);
     }
 
 }
@@ -2406,7 +2370,6 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->stringsMinLenEdit,
         s->stringsUniqueCheck,
         s->stringsHistoryLabel,
-        s->stringsHistoryMoreBtn,
         s->stringsHistoryClearBtn,
     };
     for (HWND hwnd : controls) {
@@ -2552,9 +2515,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                          reinterpret_cast<HMENU>(IDC_ABOUT_LINK),
                                          nullptr,
                                          nullptr);
-            if (s->pageAbout) {
-                SetWindowSubclass(s->pageAbout, AboutPageSubclassProc, 1, reinterpret_cast<DWORD_PTR>(s));
-            }
 
             DWORD listStyle = WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS;
             s->pageSections = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SECTIONS), nullptr, nullptr);
@@ -2583,7 +2543,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->stringsUniqueCheck = CreateWindowW(L"BUTTON", L"\u53bb\u91cd", chkStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_UNIQUE), nullptr, nullptr);
 
             s->stringsHistoryLabel = CreateWindowW(L"STATIC", L"\u5386\u53f2\uff1a", WS_CHILD | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
-            s->stringsHistoryMoreBtn = CreateWindowW(L"BUTTON", L"\u66f4\u591a...", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_MORE), nullptr, nullptr);
             s->stringsHistoryClearBtn = CreateWindowW(L"BUTTON", L"\u6e05\u7a7a", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_CLEAR), nullptr, nullptr);
             DWORD tagStyle = WS_CHILD | BS_PUSHBUTTON;
             s->stringsHistoryTags[0] = CreateWindowW(L"BUTTON", L"", tagStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_TAG0), nullptr, nullptr);
@@ -2770,22 +2729,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     }
                     return 0;
                 }
-                case IDC_STRINGS_HISTORY_MORE: {
-                    if (!s->stringsHistoryMoreEntries.empty()) {
-                        RECT rc = {};
-                        GetWindowRect(s->stringsHistoryMoreBtn, &rc);
-                        POINT pt = {rc.left, rc.bottom};
-                        HMENU menu = CreatePopupMenu();
-                        for (size_t i = 0; i < s->stringsHistoryMoreEntries.size(); ++i) {
-                            UINT id = IDM_STRINGS_HISTORY_MORE_BASE + static_cast<UINT>(i);
-                            std::wstring text = BuildStringsHistoryTagText(s->stringsHistoryMoreEntries[i]);
-                            AppendMenuW(menu, MF_STRING, id, text.c_str());
-                        }
-                        TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
-                        DestroyMenu(menu);
-                    }
-                    return 0;
-                }
                 case IDC_STRINGS_HISTORY_CLEAR: {
                     RECT rc = {};
                     GetWindowRect(s->stringsHistoryClearBtn, &rc);
@@ -2898,14 +2841,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     return 0;
                 }
                 default: {
-                    UINT id = LOWORD(wParam);
-                    if (id >= IDM_STRINGS_HISTORY_MORE_BASE && !s->stringsHistoryMoreEntries.empty()) {
-                        size_t i = static_cast<size_t>(id - IDM_STRINGS_HISTORY_MORE_BASE);
-                        if (i < s->stringsHistoryMoreEntries.size()) {
-                            ApplyStringsHistoryEntry(s, s->stringsHistoryMoreEntries[i]);
-                            return 0;
-                        }
-                    }
                     break;
                 }
             }
@@ -3038,7 +2973,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                     s->stringsMinLenEdit,
                                     s->stringsUniqueCheck,
                                     s->stringsHistoryLabel,
-                                    s->stringsHistoryMoreBtn,
                                     s->stringsHistoryClearBtn,
                                     s->pageStrings};
                     for (HWND c : ctrls) {
