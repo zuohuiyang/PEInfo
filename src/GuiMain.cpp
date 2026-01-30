@@ -55,7 +55,6 @@ DECLARE_HANDLE(DPI_AWARENESS_CONTEXT);
 enum : UINT {
     IDC_BTN_OPEN_SMALL = 1001,
     IDC_BTN_SETTINGS_GEAR = 1002,
-    IDC_BTN_OPEN_BIG = 1003,
     IDC_TAB = 1010,
     IDC_FILEINFO = 1020,
     IDC_SUMMARY = 2001,
@@ -147,7 +146,6 @@ struct GuiState {
     HWND hwnd = nullptr;
     HWND btnOpenSmall = nullptr;
     HWND btnSettingsGear = nullptr;
-    HWND btnOpenBig = nullptr;
     HWND fileInfo = nullptr;
     HWND tab = nullptr;
 
@@ -1254,7 +1252,6 @@ static void PopulateHash(HWND edit, const std::vector<HashResult>& hashes) {
 static void SetBusy(GuiState* s, bool busy) {
     s->busy = busy;
     EnableWindow(s->btnOpenSmall, !busy);
-    EnableWindow(s->btnOpenBig, !busy);
     EnableWindow(s->btnSettingsGear, !busy);
 }
 
@@ -1602,7 +1599,7 @@ static void UpdateFileInfo(GuiState* s) {
 static void RefreshAllViews(GuiState* s) {
     SetWindowTextWString(s->aboutInfo, BuildAboutText());
     if (s->analysis == nullptr) {
-        std::wstring hint = L"\u62d6\u62fd EXE/DLL/SYS \u5230\u7a97\u53e3\uff0c\u6216\u70b9\u51fb\u201c\u9009\u62e9\u6587\u4ef6...\u201d";
+        std::wstring hint = L"\u62d6\u62fd EXE/DLL/SYS \u5230\u7a97\u53e3";
         SetWindowTextWString(s->pageSummary, hint);
         ListView_DeleteAllItems(s->pageSections);
         ListView_DeleteAllItems(s->pageImportsDlls);
@@ -1622,7 +1619,6 @@ static void RefreshAllViews(GuiState* s) {
         SetWindowTextWString(s->pageSignature, L"");
         SetWindowTextWString(s->pageHash, L"");
         UpdateFileInfo(s);
-        ShowWindow(s->btnOpenBig, SW_SHOW);
         return;
     }
 
@@ -1637,7 +1633,6 @@ static void RefreshAllViews(GuiState* s) {
     PopulateSignature(s->pageSignature, *s->analysis, IsVerifyInFlightForCurrent(s));
     PopulateHash(s->pageHash, s->analysis->hashes);
     UpdateFileInfo(s);
-    ShowWindow(s->btnOpenBig, SW_HIDE);
 }
 
 static unsigned __stdcall AnalysisThreadProc(void* param) {
@@ -2294,11 +2289,6 @@ static void UpdateLayout(GuiState* s) {
         MoveWindow(s->aboutLink, apad, apad + infoH + agap, contentW, linkH, TRUE);
     }
 
-    int bigBtnW = MulDiv(300, static_cast<int>(s->dpi), 96);
-    int bigBtnH = MulDiv(56, static_cast<int>(s->dpi), 96);
-    int bigX = pageRc.left + (pageW - bigBtnW) / 2;
-    int bigY = pageRc.top + (pageH - bigBtnH) / 2;
-    MoveWindow(s->btnOpenBig, bigX, bigY, bigBtnW, bigBtnH, TRUE);
 }
 
 static UINT GetBestWindowDpi(HWND hwnd) {
@@ -2365,7 +2355,6 @@ static void ApplyUiFontAndTheme(GuiState* s) {
     HWND controls[] = {
         s->btnOpenSmall,
         s->btnSettingsGear,
-        s->btnOpenBig,
         s->fileInfo,
         s->tab,
         s->pageSummary,
@@ -2481,7 +2470,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                         nullptr);
 
             s->btnOpenSmall = CreateWindowW(L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_ICON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_OPEN_SMALL), nullptr, nullptr);
-            s->btnOpenBig = CreateWindowW(L"BUTTON", L"\u9009\u62e9\u6587\u4ef6...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_BTN_OPEN_BIG), nullptr, nullptr);
 
             SHSTOCKICONINFO sii = {};
             sii.cbSize = sizeof(sii);
@@ -2698,8 +2686,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
         case WM_COMMAND: {
             switch (LOWORD(wParam)) {
-                case IDC_BTN_OPEN_SMALL:
-                case IDC_BTN_OPEN_BIG: {
+                case IDC_BTN_OPEN_SMALL: {
                     std::wstring path = PromptOpenFile(hwnd);
                     if (!path.empty()) {
                         StartAnalysis(s, path);
