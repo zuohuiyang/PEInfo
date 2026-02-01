@@ -58,6 +58,7 @@ enum : UINT {
     IDC_TAB = 1010,
     IDC_FILEINFO = 1020,
     IDC_SUMMARY = 2001,
+    IDC_HEADERS = 2014,
     IDC_SECTIONS = 2002,
     IDC_IMPORTS = 2003,
     IDC_EXPORTS = 2004,
@@ -92,15 +93,16 @@ enum : UINT {
 
 enum class TabIndex : int {
     Summary = 0,
-    Sections = 1,
-    Imports = 2,
-    Exports = 3,
-    Strings = 4,
-    Resources = 5,
-    DebugPdb = 6,
-    Signature = 7,
-    Hash = 8,
-    About = 9
+    Headers = 1,
+    Sections = 2,
+    Imports = 3,
+    Exports = 4,
+    Strings = 5,
+    Resources = 6,
+    DebugPdb = 7,
+    Signature = 8,
+    Hash = 9,
+    About = 10
 };
 
 enum : UINT {
@@ -113,7 +115,8 @@ enum : UINT {
     IDM_STRINGS_HISTORY_CLEAR_ALL = 41011,
     IDM_STRINGS_HISTORY_PIN = 41012,
     IDM_STRINGS_HISTORY_UNPIN = 41013,
-    IDM_STRINGS_HISTORY_DELETE = 41014
+    IDM_STRINGS_HISTORY_DELETE = 41014,
+    IDM_HEADERS_COPY_ROW = 42001
 };
 
 struct VerifyResultMessage {
@@ -148,6 +151,7 @@ struct GuiState {
     HWND tab = nullptr;
 
     HWND pageSummary = nullptr;
+    HWND pageHeaders = nullptr;
     HWND pageSections = nullptr;
     HWND pageImportsDlls = nullptr;
     HWND pageImports = nullptr;
@@ -364,6 +368,21 @@ static bool CopyTextToClipboard(HWND owner, const std::wstring& text) {
     return true;
 }
 
+static bool CopySelectedHeadersRow(HWND owner, HWND list) {
+    int sel = ListView_GetNextItem(list, -1, LVNI_SELECTED);
+    if (sel < 0) {
+        return false;
+    }
+    wchar_t f[512] = {};
+    wchar_t v[2048] = {};
+    wchar_t r[512] = {};
+    ListView_GetItemText(list, sel, 0, f, static_cast<int>(std::size(f)));
+    ListView_GetItemText(list, sel, 1, v, static_cast<int>(std::size(v)));
+    ListView_GetItemText(list, sel, 2, r, static_cast<int>(std::size(r)));
+    std::wstring line = std::wstring(f) + L"\t" + v + L"\t" + r;
+    return CopyTextToClipboard(owner, line);
+}
+
 static std::wstring GetControlText(HWND hwnd) {
     int len = GetWindowTextLengthW(hwnd);
     if (len <= 0) {
@@ -466,6 +485,128 @@ static void SetListViewText(HWND list, int row, int col, const std::wstring& tex
         return;
     }
     ListView_SetItemText(list, row, col, const_cast<wchar_t*>(text.c_str()));
+}
+
+static void InsertHeaderRow(HWND list, int row, int groupId, const std::wstring& field, const std::wstring& value, const std::wstring& raw) {
+    LVITEMW item = {};
+    item.mask = LVIF_TEXT | LVIF_GROUPID;
+    item.iItem = row;
+    item.iSubItem = 0;
+    item.iGroupId = groupId;
+    item.pszText = const_cast<wchar_t*>(field.c_str());
+    ListView_InsertItem(list, &item);
+    ListView_SetItemText(list, row, 1, const_cast<wchar_t*>(value.c_str()));
+    ListView_SetItemText(list, row, 2, const_cast<wchar_t*>(raw.c_str()));
+}
+
+static void PopulateHeaders(HWND list, const PEParser& parser) {
+    ListView_DeleteAllItems(list);
+    if (!parser.IsValidPE()) {
+        InsertHeaderRow(list, 0, 1, L"Error", L"Not a valid PE file", L"");
+        return;
+    }
+
+    const auto& h = parser.GetHeaderInfo();
+    int row = 0;
+
+    auto addU16 = [&](int groupId, const wchar_t* name, WORD v) {
+        InsertHeaderRow(list, row++, groupId, name, std::to_wstring(v), HexU32(v, 4));
+    };
+    auto addU32 = [&](int groupId, const wchar_t* name, DWORD v) {
+        InsertHeaderRow(list, row++, groupId, name, std::to_wstring(v), HexU32(v, 8));
+    };
+    auto addU64 = [&](int groupId, const wchar_t* name, ULONGLONG v) {
+        InsertHeaderRow(list, row++, groupId, name, std::to_wstring(v), HexU64(v, 16));
+    };
+    auto addByte = [&](int groupId, const wchar_t* name, BYTE v) {
+        InsertHeaderRow(list, row++, groupId, name, std::to_wstring(v), HexU32(v, 2));
+    };
+
+    InsertHeaderRow(list, row++, 1, L"e_magic", (h.dosMagic == IMAGE_DOS_SIGNATURE) ? L"MZ" : L"(invalid)", HexU32(h.dosMagic, 4));
+    addU16(1, L"e_cblp (Bytes on last page)", h.dosBytesOnLastPage);
+    addU16(1, L"e_cp (Pages in file)", h.dosPagesInFile);
+    addU16(1, L"e_crlc (Relocations)", h.dosRelocations);
+    addU16(1, L"e_cparhdr (Size of header)", h.dosSizeOfHeader);
+    addU16(1, L"e_minalloc (Min alloc)", h.dosMinAlloc);
+    addU16(1, L"e_maxalloc (Max alloc)", h.dosMaxAlloc);
+    addU16(1, L"e_ss (Initial SS)", h.dosInitialSS);
+    addU16(1, L"e_sp (Initial SP)", h.dosInitialSP);
+    addU16(1, L"e_csum (Checksum)", h.dosChecksum);
+    addU16(1, L"e_ip (Initial IP)", h.dosInitialIP);
+    addU16(1, L"e_cs (Initial CS)", h.dosInitialCS);
+    addU16(1, L"e_lfarlc (Table of relocations)", h.dosTableOfRelocations);
+    addU16(1, L"e_ovno (Overlay number)", h.dosOverlayNumber);
+    addU16(1, L"e_oemid (OEM identifier)", h.dosOemIdentifier);
+    addU16(1, L"e_oeminfo (OEM information)", h.dosOemInformation);
+    InsertHeaderRow(list, row++, 1, L"e_lfanew (PE header offset)", std::to_wstring(h.dosPeHeaderOffset), HexU32(static_cast<DWORD>(h.dosPeHeaderOffset), 8));
+
+    InsertHeaderRow(list, row++, 2, L"Signature", (h.peSignature == IMAGE_NT_SIGNATURE) ? L"PE\\0\\0" : L"(invalid)", HexU32(h.peSignature, 8));
+    InsertHeaderRow(list, row++, 2, L"Machine", CoffMachineToName(h.machine), HexU32(h.machine, 4));
+    addU32(2, L"NumberOfSections", h.numberOfSections);
+    InsertHeaderRow(list, row++, 2, L"TimeDateStamp", FormatCoffTime(h.timeDateStamp, ReportTimeFormat::Local), HexU32(h.timeDateStamp, 8));
+    addU32(2, L"PointerToSymbolTable", h.pointerToSymbolTable);
+    addU32(2, L"NumberOfSymbols", h.numberOfSymbols);
+    addU16(2, L"SizeOfOptionalHeader", h.sizeOfOptionalHeader);
+    addU16(2, L"Characteristics", h.characteristics);
+
+    InsertHeaderRow(list, row++, 3, L"Magic", (h.peOptionalMagic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) ? L"PE32+" : L"PE32", HexU32(h.peOptionalMagic, 4));
+    addByte(3, L"MajorLinkerVersion", h.majorLinkerVersion);
+    addByte(3, L"MinorLinkerVersion", h.minorLinkerVersion);
+    addU32(3, L"SizeOfCode", h.sizeOfCode);
+    addU32(3, L"SizeOfInitializedData", h.sizeOfInitializedData);
+    addU32(3, L"SizeOfUninitializedData", h.sizeOfUninitializedData);
+    addU32(3, L"AddressOfEntryPoint", h.entryPoint);
+    addU32(3, L"BaseOfCode", h.baseOfCode);
+    if (h.peOptionalMagic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+        addU32(3, L"BaseOfData", h.baseOfData);
+    }
+    addU64(3, L"ImageBase", h.imageBase);
+    addU32(3, L"SectionAlignment", h.sectionAlignment);
+    addU32(3, L"FileAlignment", h.fileAlignment);
+    addU16(3, L"MajorOperatingSystemVersion", h.majorOperatingSystemVersion);
+    addU16(3, L"MinorOperatingSystemVersion", h.minorOperatingSystemVersion);
+    addU16(3, L"MajorImageVersion", h.majorImageVersion);
+    addU16(3, L"MinorImageVersion", h.minorImageVersion);
+    addU16(3, L"MajorSubsystemVersion", h.majorSubsystemVersion);
+    addU16(3, L"MinorSubsystemVersion", h.minorSubsystemVersion);
+    addU32(3, L"Win32VersionValue", h.win32VersionValue);
+    addU32(3, L"SizeOfImage", h.sizeOfImage);
+    addU32(3, L"SizeOfHeaders", h.sizeOfHeaders);
+    addU32(3, L"CheckSum", h.checksum);
+    InsertHeaderRow(list, row++, 3, L"Subsystem", ToWStringUtf8BestEffort(h.subsystem), HexU32(h.subsystemValue, 4));
+    addU16(3, L"DllCharacteristics", h.dllCharacteristics);
+    addU64(3, L"SizeOfStackReserve", h.sizeOfStackReserve);
+    addU64(3, L"SizeOfStackCommit", h.sizeOfStackCommit);
+    addU64(3, L"SizeOfHeapReserve", h.sizeOfHeapReserve);
+    addU64(3, L"SizeOfHeapCommit", h.sizeOfHeapCommit);
+    addU32(3, L"LoaderFlags", h.loaderFlags);
+    addU32(3, L"NumberOfRvaAndSizes", h.numberOfRvaAndSizes);
+
+    const wchar_t* dirNames[IMAGE_NUMBEROF_DIRECTORY_ENTRIES] = {
+        L"Export",
+        L"Import",
+        L"Resource",
+        L"Exception",
+        L"Security",
+        L"Base Relocation",
+        L"Debug",
+        L"Architecture",
+        L"Global Ptr",
+        L"TLS",
+        L"Load Config",
+        L"Bound Import",
+        L"IAT",
+        L"Delay Import",
+        L"CLR Runtime",
+        L"Reserved",
+    };
+
+    for (size_t i = 0; i < h.dataDirectories.size() && i < std::size(dirNames); ++i) {
+        const auto& d = h.dataDirectories[i];
+        std::wstring name = dirNames[i];
+        name += L" Directory";
+        InsertHeaderRow(list, row++, 4, name, HexU32(d.VirtualAddress, 8), HexU32(d.Size, 8));
+    }
 }
 
 static void PopulateSections(HWND list, const PEParser& parser) {
@@ -1529,7 +1670,17 @@ static RECT GetTabPageRect(HWND hwndMain, HWND hwndTab) {
 }
 
 static void ShowOnlyTab(GuiState* s, TabIndex idx) {
-    HWND pages[] = {s->pageSummary, s->pageSections, s->pageImports, s->pageExports, s->pageStrings, s->pageResources, s->pagePdb, s->pageSignature, s->pageHash, s->pageAbout};
+    HWND pages[] = {s->pageSummary,
+                    s->pageHeaders,
+                    s->pageSections,
+                    s->pageImports,
+                    s->pageExports,
+                    s->pageStrings,
+                    s->pageResources,
+                    s->pagePdb,
+                    s->pageSignature,
+                    s->pageHash,
+                    s->pageAbout};
     for (int i = 0; i < static_cast<int>(std::size(pages)); ++i) {
         ShowWindow(pages[i], (i == static_cast<int>(idx)) ? SW_SHOW : SW_HIDE);
     }
@@ -1591,6 +1742,7 @@ static void RefreshAllViews(GuiState* s) {
     if (s->analysis == nullptr) {
         std::wstring hint = L"\u62d6\u62fd EXE/DLL/SYS \u5230\u7a97\u53e3";
         SetWindowTextWString(s->pageSummary, hint);
+        ListView_DeleteAllItems(s->pageHeaders);
         ListView_DeleteAllItems(s->pageSections);
         ListView_DeleteAllItems(s->pageImportsDlls);
         ListView_DeleteAllItems(s->pageImports);
@@ -1613,6 +1765,7 @@ static void RefreshAllViews(GuiState* s) {
     }
 
     SetWindowTextWString(s->pageSummary, FormatSummaryText(*s->analysis));
+    PopulateHeaders(s->pageHeaders, s->analysis->parser);
     PopulateSections(s->pageSections, s->analysis->parser);
     BuildImportRowsFromParser(s->importsAllRows, s->analysis->parser);
     ApplyImportsFilterNow(s);
@@ -2144,6 +2297,7 @@ static void UpdateLayout(GuiState* s) {
     int pageH = pageRc.bottom - pageRc.top;
 
     MoveWindow(s->pageSummary, pageRc.left, pageRc.top, pageW, pageH, TRUE);
+    MoveWindow(s->pageHeaders, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pageSections, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     int filterH = MulDiv(28, static_cast<int>(s->dpi), 96);
     int filterLabelW = MulDiv(28, static_cast<int>(s->dpi), 96);
@@ -2345,6 +2499,7 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->fileInfo,
         s->tab,
         s->pageSummary,
+        s->pageHeaders,
         s->pageSections,
         s->pageImportsDlls,
         s->pageImports,
@@ -2396,6 +2551,7 @@ static void ApplyUiFontAndTheme(GuiState* s) {
     }
 
     SetWindowTheme(s->tab, L"Explorer", nullptr);
+    SetWindowTheme(s->pageHeaders, L"Explorer", nullptr);
     SetWindowTheme(s->pageSections, L"Explorer", nullptr);
     SetWindowTheme(s->pageImportsDlls, L"Explorer", nullptr);
     SetWindowTheme(s->pageImports, L"Explorer", nullptr);
@@ -2411,6 +2567,7 @@ static void ApplyUiFontAndTheme(GuiState* s) {
     SendMessageW(s->aboutInfo, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(editMargin, editMargin));
 
     DWORD ex = LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP;
+    ListView_SetExtendedListViewStyleEx(s->pageHeaders, ex, ex);
     ListView_SetExtendedListViewStyleEx(s->pageSections, ex, ex);
     ListView_SetExtendedListViewStyleEx(s->pageImportsDlls, ex, ex);
     ListView_SetExtendedListViewStyleEx(s->pageImports, ex, ex);
@@ -2477,6 +2634,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             ti.mask = TCIF_TEXT;
             ti.pszText = const_cast<wchar_t*>(L"Summary");
             TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Summary), &ti);
+            ti.pszText = const_cast<wchar_t*>(L"Headers");
+            TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Headers), &ti);
             ti.pszText = const_cast<wchar_t*>(L"Sections");
             TabCtrl_InsertItem(s->tab, static_cast<int>(TabIndex::Sections), &ti);
             ti.pszText = const_cast<wchar_t*>(L"Imports");
@@ -2517,6 +2676,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                          nullptr);
 
             DWORD listStyle = WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS;
+            s->pageHeaders = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_HEADERS), nullptr, nullptr);
             s->pageSections = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_SECTIONS), nullptr, nullptr);
             s->pageImportsDlls = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS_DLLS), nullptr, nullptr);
             s->pageImports = CreateWindowExW(WS_EX_STATICEDGE, WC_LISTVIEWW, L"", listStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS), nullptr, nullptr);
@@ -2555,6 +2715,31 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->stringsHistoryTags[7] = CreateWindowW(L"BUTTON", L"", tagStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_TAG7), nullptr, nullptr);
 
             auto colW = [&](int base) { return MulDiv(base, static_cast<int>(s->dpi), 96); };
+            AddListViewColumn(s->pageHeaders, 0, colW(220), L"Field");
+            AddListViewColumn(s->pageHeaders, 1, colW(560), L"Value");
+            AddListViewColumn(s->pageHeaders, 2, colW(160), L"Raw");
+            ListView_EnableGroupView(s->pageHeaders, TRUE);
+            {
+                LVGROUP g = {};
+                g.cbSize = sizeof(g);
+                g.mask = LVGF_GROUPID | LVGF_HEADER;
+
+                g.iGroupId = 1;
+                g.pszHeader = const_cast<wchar_t*>(L"DOS Header");
+                ListView_InsertGroup(s->pageHeaders, -1, &g);
+
+                g.iGroupId = 2;
+                g.pszHeader = const_cast<wchar_t*>(L"COFF File Header");
+                ListView_InsertGroup(s->pageHeaders, -1, &g);
+
+                g.iGroupId = 3;
+                g.pszHeader = const_cast<wchar_t*>(L"Optional Header");
+                ListView_InsertGroup(s->pageHeaders, -1, &g);
+
+                g.iGroupId = 4;
+                g.pszHeader = const_cast<wchar_t*>(L"Data Directories");
+                ListView_InsertGroup(s->pageHeaders, -1, &g);
+            }
             AddListViewColumn(s->pageSections, 0, colW(140), L"Name");
             AddListViewColumn(s->pageSections, 1, colW(120), L"RVA");
             AddListViewColumn(s->pageSections, 2, colW(120), L"VSize");
@@ -2776,6 +2961,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     }
                     return 0;
                 }
+                case IDM_HEADERS_COPY_ROW: {
+                    CopySelectedHeadersRow(hwnd, s->pageHeaders);
+                    return 0;
+                }
                 case IDM_STRINGS_COPY_TEXT: {
                     auto idx = GetSelectedStringsRowIndex(s);
                     if (idx.has_value() && *idx >= 0 && *idx < static_cast<int>(s->stringsAllRows.size())) {
@@ -2886,6 +3075,36 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     return 0;
                 }
             }
+            if (src == s->pageHeaders) {
+                POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                if (pt.x != -1 && pt.y != -1) {
+                    POINT clientPt = pt;
+                    ScreenToClient(s->pageHeaders, &clientPt);
+                    LVHITTESTINFO ht = {};
+                    ht.pt = clientPt;
+                    int hit = ListView_SubItemHitTest(s->pageHeaders, &ht);
+                    if (hit >= 0) {
+                        ListView_SetItemState(s->pageHeaders, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+                        ListView_SetItemState(s->pageHeaders, hit, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+                    }
+                } else {
+                    int sel = ListView_GetNextItem(s->pageHeaders, -1, LVNI_SELECTED);
+                    if (sel >= 0) {
+                        RECT rc = {};
+                        ListView_GetItemRect(s->pageHeaders, sel, &rc, LVIR_BOUNDS);
+                        POINT p = {rc.left, rc.bottom};
+                        ClientToScreen(s->pageHeaders, &p);
+                        pt = p;
+                    } else {
+                        GetCursorPos(&pt);
+                    }
+                }
+                HMENU menu = CreatePopupMenu();
+                AppendMenuW(menu, MF_STRING, IDM_HEADERS_COPY_ROW, L"\u590d\u5236\u884c");
+                TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+                DestroyMenu(menu);
+                return 0;
+            }
             if (src != s->pageStrings) {
                 break;
             }
@@ -2992,6 +3211,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     StartVerifyIfNeeded(s, false);
                 }
                 return 0;
+            }
+            if (nm->hwndFrom == s->pageHeaders && nm->code == LVN_KEYDOWN) {
+                auto* kd = reinterpret_cast<NMLVKEYDOWN*>(lParam);
+                if (kd->wVKey == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+                    CopySelectedHeadersRow(hwnd, s->pageHeaders);
+                    return 0;
+                }
             }
             if (nm->hwndFrom == s->pageImportsDlls && nm->code == LVN_ITEMCHANGED) {
                 if (s->importsSyncingSelection) {

@@ -45,6 +45,7 @@ void PEParser::UnloadFile() {
     m_isPE32Plus = false;
     m_sectionHeaders = nullptr;
     m_isValidPE = false;
+    m_headerInfo = {};
     m_imports.clear();
     m_delayImports.clear();
     m_exports.clear();
@@ -113,26 +114,112 @@ bool PEParser::ParsePE() {
     m_sectionHeaders = reinterpret_cast<PIMAGE_SECTION_HEADER>(const_cast<BYTE*>(sectionBase));
 
     // Fill header information
+    m_headerInfo.peSignature = signature;
+    m_headerInfo.peOptionalMagic = optionalMagic;
+
+    m_headerInfo.dosMagic = m_dosHeader->e_magic;
+    m_headerInfo.dosBytesOnLastPage = m_dosHeader->e_cblp;
+    m_headerInfo.dosPagesInFile = m_dosHeader->e_cp;
+    m_headerInfo.dosRelocations = m_dosHeader->e_crlc;
+    m_headerInfo.dosSizeOfHeader = m_dosHeader->e_cparhdr;
+    m_headerInfo.dosMinAlloc = m_dosHeader->e_minalloc;
+    m_headerInfo.dosMaxAlloc = m_dosHeader->e_maxalloc;
+    m_headerInfo.dosInitialSS = m_dosHeader->e_ss;
+    m_headerInfo.dosInitialSP = m_dosHeader->e_sp;
+    m_headerInfo.dosChecksum = m_dosHeader->e_csum;
+    m_headerInfo.dosInitialIP = m_dosHeader->e_ip;
+    m_headerInfo.dosInitialCS = m_dosHeader->e_cs;
+    m_headerInfo.dosTableOfRelocations = m_dosHeader->e_lfarlc;
+    m_headerInfo.dosOverlayNumber = m_dosHeader->e_ovno;
+    m_headerInfo.dosOemIdentifier = m_dosHeader->e_oemid;
+    m_headerInfo.dosOemInformation = m_dosHeader->e_oeminfo;
+    m_headerInfo.dosPeHeaderOffset = m_dosHeader->e_lfanew;
+
     m_headerInfo.is32Bit = (fileHeader->Machine == IMAGE_FILE_MACHINE_I386);
     m_headerInfo.is64Bit = (fileHeader->Machine == IMAGE_FILE_MACHINE_AMD64);
     m_headerInfo.machine = fileHeader->Machine;
     m_headerInfo.numberOfSections = fileHeader->NumberOfSections;
     m_headerInfo.timeDateStamp = fileHeader->TimeDateStamp;
+    m_headerInfo.pointerToSymbolTable = fileHeader->PointerToSymbolTable;
+    m_headerInfo.numberOfSymbols = fileHeader->NumberOfSymbols;
+    m_headerInfo.sizeOfOptionalHeader = fileHeader->SizeOfOptionalHeader;
+    m_headerInfo.characteristics = fileHeader->Characteristics;
 
     DWORD subsystemValue = 0;
     if (m_isPE32Plus) {
-        m_headerInfo.sizeOfImage = m_ntHeaders64->OptionalHeader.SizeOfImage;
-        m_headerInfo.entryPoint = m_ntHeaders64->OptionalHeader.AddressOfEntryPoint;
-        m_headerInfo.imageBase = m_ntHeaders64->OptionalHeader.ImageBase;
-        subsystemValue = m_ntHeaders64->OptionalHeader.Subsystem;
+        const auto& opt = m_ntHeaders64->OptionalHeader;
+        m_headerInfo.majorLinkerVersion = opt.MajorLinkerVersion;
+        m_headerInfo.minorLinkerVersion = opt.MinorLinkerVersion;
+        m_headerInfo.sizeOfCode = opt.SizeOfCode;
+        m_headerInfo.sizeOfInitializedData = opt.SizeOfInitializedData;
+        m_headerInfo.sizeOfUninitializedData = opt.SizeOfUninitializedData;
+        m_headerInfo.entryPoint = opt.AddressOfEntryPoint;
+        m_headerInfo.baseOfCode = opt.BaseOfCode;
+        m_headerInfo.baseOfData = 0;
+        m_headerInfo.imageBase = opt.ImageBase;
+        m_headerInfo.sectionAlignment = opt.SectionAlignment;
+        m_headerInfo.fileAlignment = opt.FileAlignment;
+        m_headerInfo.majorOperatingSystemVersion = opt.MajorOperatingSystemVersion;
+        m_headerInfo.minorOperatingSystemVersion = opt.MinorOperatingSystemVersion;
+        m_headerInfo.majorImageVersion = opt.MajorImageVersion;
+        m_headerInfo.minorImageVersion = opt.MinorImageVersion;
+        m_headerInfo.majorSubsystemVersion = opt.MajorSubsystemVersion;
+        m_headerInfo.minorSubsystemVersion = opt.MinorSubsystemVersion;
+        m_headerInfo.win32VersionValue = opt.Win32VersionValue;
+        m_headerInfo.sizeOfImage = opt.SizeOfImage;
+        m_headerInfo.sizeOfHeaders = opt.SizeOfHeaders;
+        m_headerInfo.checksum = opt.CheckSum;
+        m_headerInfo.dllCharacteristics = opt.DllCharacteristics;
+        m_headerInfo.sizeOfStackReserve = opt.SizeOfStackReserve;
+        m_headerInfo.sizeOfStackCommit = opt.SizeOfStackCommit;
+        m_headerInfo.sizeOfHeapReserve = opt.SizeOfHeapReserve;
+        m_headerInfo.sizeOfHeapCommit = opt.SizeOfHeapCommit;
+        m_headerInfo.loaderFlags = opt.LoaderFlags;
+        m_headerInfo.numberOfRvaAndSizes = opt.NumberOfRvaAndSizes;
+        m_headerInfo.dataDirectories = {};
+        for (size_t i = 0; i < m_headerInfo.dataDirectories.size(); ++i) {
+            m_headerInfo.dataDirectories[i] = opt.DataDirectory[i];
+        }
+        subsystemValue = opt.Subsystem;
     } else {
-        m_headerInfo.sizeOfImage = m_ntHeaders32->OptionalHeader.SizeOfImage;
-        m_headerInfo.entryPoint = m_ntHeaders32->OptionalHeader.AddressOfEntryPoint;
-        m_headerInfo.imageBase = m_ntHeaders32->OptionalHeader.ImageBase;
-        subsystemValue = m_ntHeaders32->OptionalHeader.Subsystem;
+        const auto& opt = m_ntHeaders32->OptionalHeader;
+        m_headerInfo.majorLinkerVersion = opt.MajorLinkerVersion;
+        m_headerInfo.minorLinkerVersion = opt.MinorLinkerVersion;
+        m_headerInfo.sizeOfCode = opt.SizeOfCode;
+        m_headerInfo.sizeOfInitializedData = opt.SizeOfInitializedData;
+        m_headerInfo.sizeOfUninitializedData = opt.SizeOfUninitializedData;
+        m_headerInfo.entryPoint = opt.AddressOfEntryPoint;
+        m_headerInfo.baseOfCode = opt.BaseOfCode;
+        m_headerInfo.baseOfData = opt.BaseOfData;
+        m_headerInfo.imageBase = opt.ImageBase;
+        m_headerInfo.sectionAlignment = opt.SectionAlignment;
+        m_headerInfo.fileAlignment = opt.FileAlignment;
+        m_headerInfo.majorOperatingSystemVersion = opt.MajorOperatingSystemVersion;
+        m_headerInfo.minorOperatingSystemVersion = opt.MinorOperatingSystemVersion;
+        m_headerInfo.majorImageVersion = opt.MajorImageVersion;
+        m_headerInfo.minorImageVersion = opt.MinorImageVersion;
+        m_headerInfo.majorSubsystemVersion = opt.MajorSubsystemVersion;
+        m_headerInfo.minorSubsystemVersion = opt.MinorSubsystemVersion;
+        m_headerInfo.win32VersionValue = opt.Win32VersionValue;
+        m_headerInfo.sizeOfImage = opt.SizeOfImage;
+        m_headerInfo.sizeOfHeaders = opt.SizeOfHeaders;
+        m_headerInfo.checksum = opt.CheckSum;
+        m_headerInfo.dllCharacteristics = opt.DllCharacteristics;
+        m_headerInfo.sizeOfStackReserve = opt.SizeOfStackReserve;
+        m_headerInfo.sizeOfStackCommit = opt.SizeOfStackCommit;
+        m_headerInfo.sizeOfHeapReserve = opt.SizeOfHeapReserve;
+        m_headerInfo.sizeOfHeapCommit = opt.SizeOfHeapCommit;
+        m_headerInfo.loaderFlags = opt.LoaderFlags;
+        m_headerInfo.numberOfRvaAndSizes = opt.NumberOfRvaAndSizes;
+        m_headerInfo.dataDirectories = {};
+        for (size_t i = 0; i < m_headerInfo.dataDirectories.size(); ++i) {
+            m_headerInfo.dataDirectories[i] = opt.DataDirectory[i];
+        }
+        subsystemValue = opt.Subsystem;
     }
     
     // Get subsystem string
+    m_headerInfo.subsystemValue = static_cast<WORD>(subsystemValue);
     switch (subsystemValue) {
         case IMAGE_SUBSYSTEM_NATIVE: m_headerInfo.subsystem = "Native"; break;
         case IMAGE_SUBSYSTEM_WINDOWS_GUI: m_headerInfo.subsystem = "Windows GUI"; break;

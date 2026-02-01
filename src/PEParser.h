@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <array>
 
 struct PEImportFunction {
     std::string name;
@@ -27,13 +28,66 @@ struct PEExportFunction {
 struct PEHeaderInfo {
     bool is32Bit;
     bool is64Bit;
+    DWORD peSignature;
+    WORD peOptionalMagic;
+
+    WORD dosMagic;
+    WORD dosBytesOnLastPage;
+    WORD dosPagesInFile;
+    WORD dosRelocations;
+    WORD dosSizeOfHeader;
+    WORD dosMinAlloc;
+    WORD dosMaxAlloc;
+    WORD dosInitialSS;
+    WORD dosInitialSP;
+    WORD dosChecksum;
+    WORD dosInitialIP;
+    WORD dosInitialCS;
+    WORD dosTableOfRelocations;
+    WORD dosOverlayNumber;
+    WORD dosOemIdentifier;
+    WORD dosOemInformation;
+    LONG dosPeHeaderOffset;
+
     WORD machine;
     DWORD numberOfSections;
     DWORD timeDateStamp;
+    DWORD pointerToSymbolTable;
+    DWORD numberOfSymbols;
+    WORD sizeOfOptionalHeader;
+    WORD characteristics;
+
+    BYTE majorLinkerVersion;
+    BYTE minorLinkerVersion;
+    DWORD sizeOfCode;
+    DWORD sizeOfInitializedData;
+    DWORD sizeOfUninitializedData;
     DWORD sizeOfImage;
+    DWORD sizeOfHeaders;
+    DWORD checksum;
     DWORD entryPoint;
+    DWORD baseOfCode;
+    DWORD baseOfData;
     ULONGLONG imageBase;
+    DWORD sectionAlignment;
+    DWORD fileAlignment;
+    WORD majorOperatingSystemVersion;
+    WORD minorOperatingSystemVersion;
+    WORD majorImageVersion;
+    WORD minorImageVersion;
+    WORD majorSubsystemVersion;
+    WORD minorSubsystemVersion;
+    DWORD win32VersionValue;
+    WORD subsystemValue;
     std::string subsystem;
+    WORD dllCharacteristics;
+    ULONGLONG sizeOfStackReserve;
+    ULONGLONG sizeOfStackCommit;
+    ULONGLONG sizeOfHeapReserve;
+    ULONGLONG sizeOfHeapCommit;
+    DWORD loaderFlags;
+    DWORD numberOfRvaAndSizes;
+    std::array<IMAGE_DATA_DIRECTORY, IMAGE_NUMBEROF_DIRECTORY_ENTRIES> dataDirectories;
 };
 
 struct PESectionInfo {
