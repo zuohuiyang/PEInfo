@@ -13,7 +13,7 @@ struct StringsSearchHistoryEntry {
     StringsSearchMode mode = StringsSearchMode::Plain;
     std::wstring query;
     int typeFilter = 0;
-    int minLen = 4;
+    int minLen = 5;
     bool unique = true;
     bool pinned = false;
     uint32_t useCount = 0;

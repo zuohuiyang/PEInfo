@@ -5,7 +5,28 @@
 #include <algorithm>
 
 static bool IsAsciiPrintable(uint8_t b) {
-    return (b >= 0x20 && b <= 0x7E);
+    return (b >= 0x20 && b <= 0x7E) || b == 0x09 || b == 0x0A || b == 0x0D;
+}
+
+static constexpr size_t kRepeatRunLimit = 8;
+
+template <typename CharT>
+static bool HasRepeatRun(const std::basic_string<CharT>& s, size_t limit) {
+    if (limit <= 1) {
+        return !s.empty();
+    }
+    size_t run = 1;
+    for (size_t i = 1; i < s.size(); ++i) {
+        if (s[i] == s[i - 1]) {
+            ++run;
+            if (run >= limit) {
+                return true;
+            }
+        } else {
+            run = 1;
+        }
+    }
+    return false;
 }
 
 static void AppendAsciiHitIfNeeded(const StringsScanOptions& opt,
@@ -13,6 +34,9 @@ static void AppendAsciiHitIfNeeded(const StringsScanOptions& opt,
                                    uint64_t startOffset,
                                    const std::string& bytes) {
     if (bytes.size() < static_cast<size_t>(opt.minLen)) {
+        return;
+    }
+    if (HasRepeatRun(bytes, kRepeatRunLimit)) {
         return;
     }
     StringsHit hit;
@@ -30,6 +54,9 @@ static void AppendUtf16HitIfNeeded(const StringsScanOptions& opt,
                                    uint64_t startOffset,
                                    const std::wstring& w) {
     if (w.size() < static_cast<size_t>(opt.minLen)) {
+        return;
+    }
+    if (HasRepeatRun(w, kRepeatRunLimit)) {
         return;
     }
     StringsHit hit;

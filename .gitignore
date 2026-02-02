@@ -51,6 +51,10 @@ test_build/Testing/
 *.res
 artifacts/
 
+# Python
+__pycache__/
+*.pyc
+
 # Local verification artifacts
 /_cli.*
 /_gui*

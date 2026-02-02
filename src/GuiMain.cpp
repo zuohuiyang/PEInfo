@@ -143,6 +143,9 @@ struct StringsResultMessage {
     std::wstring error;
     bool truncated = false;
     size_t hitLimit = 0;
+    int minLen = 5;
+    bool scanAscii = true;
+    bool scanUtf16Le = true;
 };
 
 struct GuiState {
@@ -238,7 +241,7 @@ struct GuiState {
     size_t stringsFilterPos = 0;
     uint64_t stringsFilterGen = 0;
     std::vector<std::wstring> stringsFilterTokens;
-    int stringsFilterMinLen = 4;
+    int stringsFilterMinLen = 5;
     int stringsFilterType = 0;
     bool stringsFilterUnique = true;
     bool stringsFilterUseRegex = false;
@@ -276,6 +279,13 @@ struct StringsRowsBuildPayload {
     std::vector<StringsHit> hits;
     std::vector<PESectionInfo> sections;
     ULONGLONG imageBase = 0;
+};
+
+struct StringsScanPayload {
+    HWND hwnd = nullptr;
+    std::wstring filePath;
+    std::atomic<bool>* cancel = nullptr;
+    StringsScanOptions opt;
 };
 
 static UINT GetBestWindowDpi(HWND hwnd);
@@ -866,18 +876,18 @@ static std::wstring StringsTypeToText(StringsHitType t) {
 
 static int GetStringsMinLenClamped(GuiState* s) {
     if (!s || !s->stringsMinLenEdit) {
-        return 4;
+        return 5;
     }
     std::wstring v = GetControlText(s->stringsMinLenEdit);
-    int n = 4;
+    int n = 5;
     try {
         if (!v.empty()) {
             n = std::stoi(v);
         }
     } catch (...) {
-        n = 4;
+        n = 5;
     }
-    if (n < 4) n = 4;
+    if (n < 5) n = 5;
     if (n > 64) n = 64;
     std::wstring normalized = std::to_wstring(n);
     if (v != normalized) {
@@ -1922,24 +1932,20 @@ static unsigned __stdcall VerifyThreadProc(void* param) {
 }
 
 static unsigned __stdcall StringsThreadProc(void* param) {
-    struct Payload { HWND hwnd; std::wstring file; std::atomic<bool>* cancel; };
-    auto* pl = reinterpret_cast<Payload*>(param);
+    auto* pl = reinterpret_cast<StringsScanPayload*>(param);
     HWND hwnd = pl->hwnd;
-    std::wstring filePath = pl->file;
+    std::wstring filePath = pl->filePath;
     std::atomic<bool>* cancel = pl->cancel;
+    StringsScanOptions opt = pl->opt;
     delete pl;
 
     auto* msg = new StringsResultMessage();
     msg->filePath = filePath;
     msg->cancel = cancel;
-
-    StringsScanOptions opt;
-    opt.minLen = 4;
-    opt.maxLen = 4096;
-    opt.scanAscii = true;
-    opt.scanUtf16Le = true;
-    opt.maxHits = 200000;
     msg->hitLimit = opt.maxHits;
+    msg->minLen = opt.minLen;
+    msg->scanAscii = opt.scanAscii;
+    msg->scanUtf16Le = opt.scanUtf16Le;
 
     std::wstring err;
     if (!ScanStringsFromFile(filePath, opt, msg->hits, err, cancel, {}, &msg->truncated)) {
@@ -2109,10 +2115,21 @@ static void StartStringsScan(GuiState* s) {
     UpdateStringsDetail(s);
  
 
+    StringsScanOptions opt;
+    opt.minLen = GetStringsMinLenClamped(s);
+    opt.maxLen = 4096;
+    int typeIdx = GetStringsTypeFilterIndex(s);
+    opt.scanAscii = (typeIdx != 2);
+    opt.scanUtf16Le = (typeIdx != 1);
+    opt.maxHits = 3000000;
+
     auto* cancel = new std::atomic<bool>(false);
     s->stringsCancel = cancel;
-    struct Payload { HWND hwnd; std::wstring file; std::atomic<bool>* cancel; };
-    auto* payload = new Payload{s->hwnd, s->currentFile, cancel};
+    auto* payload = new StringsScanPayload();
+    payload->hwnd = s->hwnd;
+    payload->filePath = s->currentFile;
+    payload->cancel = cancel;
+    payload->opt = opt;
     uintptr_t th = _beginthreadex(nullptr, 0, StringsThreadProc, payload, 0, nullptr);
     if (th == 0) {
         delete payload;
@@ -2812,7 +2829,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->stringsTypeCombo = CreateWindowExW(WS_EX_STATICEDGE, WC_COMBOBOXW, L"", comboStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_TYPE), nullptr, nullptr);
             DWORD minLenStyle = WS_CHILD | ES_LEFT | ES_AUTOHSCROLL | ES_NUMBER;
             s->stringsMinLenLabel = CreateWindowW(L"STATIC", L"\u6700\u5c0f\u957f\u5ea6\uff1a", WS_CHILD | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
-            s->stringsMinLenEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"4", minLenStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_MINLEN), nullptr, nullptr);
+            s->stringsMinLenEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"5", minLenStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_MINLEN), nullptr, nullptr);
             DWORD chkStyle = WS_CHILD | BS_AUTOCHECKBOX;
             s->stringsUniqueCheck = CreateWindowW(L"BUTTON", L"\u53bb\u91cd", chkStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_UNIQUE), nullptr, nullptr);
 
@@ -2875,9 +2892,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             AddListViewColumn(s->pageStrings, 0, colW(120), L"Offset");
             AddListViewColumn(s->pageStrings, 1, colW(120), L"Section");
-            AddListViewColumn(s->pageStrings, 2, colW(90), L"\u7c7b\u578b(Type)");
-            AddListViewColumn(s->pageStrings, 3, colW(70), L"Len");
-            AddListViewColumn(s->pageStrings, 4, colW(520), L"Text");
+            AddListViewColumn(s->pageStrings, 2, colW(70), L"Len");
+            AddListViewColumn(s->pageStrings, 3, colW(520), L"Text");
 
             SendMessageW(s->stringsTypeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"All"));
             SendMessageW(s->stringsTypeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"ASCII"));
@@ -3370,9 +3386,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 switch (item.iSubItem) {
                     case 0: text = &r.fileOffsetHex; break;
                     case 1: text = r.section.empty() ? &dash : &r.section; break;
-                    case 2: text = &r.typeText; break;
-                    case 3: text = &r.lenText; break;
-                    case 4: text = &r.text; break;
+                    case 2: text = &r.lenText; break;
+                    case 3: text = &r.text; break;
                     default: break;
                 }
                 if (text) {
@@ -3470,7 +3485,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (m->truncated && m->hitLimit > 0) {
                 std::wostringstream out;
-                out << L"\u5b57\u7b26\u4e32\u6570\u91cf\u5df2\u8fbe\u4e0a\u9650\uff0c\u4ec5\u5c55\u793a\u524d " << m->hitLimit << L" \u6761";
+                std::wstring typeText = L"unknown";
+                if (m->scanAscii && m->scanUtf16Le) {
+                    typeText = L"ASCII+UTF16LE";
+                } else if (m->scanAscii) {
+                    typeText = L"ASCII";
+                } else if (m->scanUtf16Le) {
+                    typeText = L"UTF16LE";
+                }
+                out << L"\u5b57\u7b26\u4e32\u6570\u91cf\u5df2\u8fbe\u4e0a\u9650\uff0c\u4ec5\u5c55\u793a\u524d " << m->hitLimit << L" \u6761\u3002\r\n";
+                out << L"\u5f53\u524d\u626b\u63cf\u8bbe\u7f6e\uff1a\u6700\u5c0f\u957f\u5ea6=" << m->minLen << L"\uff0c\u7c7b\u578b=" << typeText << L"\u3002\r\n";
+                out << L"\u53ef\u63d0\u9ad8\u6700\u5c0f\u957f\u5ea6\u6216\u4ec5\u9009\u62e9\u4e00\u79cd\u7c7b\u578b\u4ee5\u51cf\u5c11\u566a\u58f0\u3002";
                 MessageBoxW(s->hwnd, out.str().c_str(), L"\u63d0\u793a", MB_OK | MB_ICONINFORMATION);
             }
 

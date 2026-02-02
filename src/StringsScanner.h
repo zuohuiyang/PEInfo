@@ -18,11 +18,11 @@ struct StringsHit {
 };
 
 struct StringsScanOptions {
-    int minLen = 4;
+    int minLen = 5;
     int maxLen = 4096;
     bool scanAscii = true;
     bool scanUtf16Le = true;
-    size_t maxHits = 200000;
+    size_t maxHits = 3000000;
 };
 
 bool ScanStringsFromFile(const std::wstring& filePath,
