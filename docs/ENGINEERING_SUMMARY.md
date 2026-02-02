@@ -11,10 +11,14 @@
 - 主程序：`PEInfo.exe`（GUI 工具，Win32 / x64 构建）
 
 ## 构建与打包
-- 构建脚本：`build.bat`
-  - 32位发布版：`./build.bat Win32 Release`
-  - 64位发布版：`./build.bat x64 Release`
-- 打包产物：`dist\PEInfo_x86_Release.zip`、`dist\PEInfo_x64_Release.zip`
+- 推荐统一入口（产物路径固定）：`scripts\build.bat` / `scripts\build.ps1`
+  - 32 位发布版：`scripts\build.bat Win32 Release`
+  - 64 位发布版：`scripts\build.bat x64 Release`
+  - 也可直接运行 PowerShell：`powershell -ExecutionPolicy Bypass -File scripts\build.ps1 x64 Release`
+- 产物路径（固定）
+  - 可执行文件：`dist\<Platform>\<Configuration>\PEInfo.exe`
+  - 调试符号（如存在）：`dist\<Platform>\<Configuration>\PEInfo.pdb`
+  - 压缩包：`dist\PEInfo_<Platform>_<Configuration>.zip`（例如：`dist\PEInfo_x64_Release.zip`、`dist\PEInfo_Win32_Release.zip`）
 
 ## 运行与验证
 - 启动 GUI：运行生成的 `PEInfo.exe`

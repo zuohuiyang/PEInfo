@@ -58,6 +58,11 @@ petools/
 1. 直接运行：`scripts\build.bat`
 2. 可选参数：`scripts\build.bat x64 Release`
 
+#### 产物路径（固定）
+- 可执行文件：`dist\<Platform>\<Configuration>\PEInfo.exe`
+- 调试符号（如存在）：`dist\<Platform>\<Configuration>\PEInfo.pdb`
+- 压缩包：`dist\PEInfo_<Platform>_<Configuration>.zip`（例如：`dist\PEInfo_x64_Release.zip`、`dist\PEInfo_Win32_Release.zip`）
+
 ⚠️ **注意**：需要安装 Visual Studio 2022（MSVC v143）与 Windows 10/11 SDK。
 
 ## 🧩 资源管理器右键菜单
@@ -76,7 +81,7 @@ PEInfo 支持在程序内一键安装/卸载右键菜单项，便于从资源管
 
 ### 说明
 - 默认仅对当前用户生效（写入 HKCU），不需要管理员权限
-- 支持的扩展名：`.exe`、`.dll`、`.sys`、`.ocx`
+- 支持的扩展名：`.exe`、`.dll`、`.sys`、`.ocx`、`.node`、`.cpl`、`.scr`、`.efi`
 - Windows 11 下自定义项通常出现在“显示更多选项”（经典右键菜单）中
   - 若未立即生效，可重启资源管理器或重新登录
 

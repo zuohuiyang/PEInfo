@@ -85,7 +85,7 @@ bool IsPeInfoShellContextMenuInstalled() {
 }
 
 bool InstallPeInfoShellContextMenuForCurrentUser(const std::wstring& guiExePath, std::wstring& error) {
-    const std::array<const wchar_t*, 4> exts = {L".exe", L".dll", L".sys", L".ocx"};
+    const std::array<const wchar_t*, 8> exts = {L".exe", L".dll", L".sys", L".ocx", L".node", L".cpl", L".scr", L".efi"};
     std::wstring displayName = L"\u7528 PEInfo \u6253\u5f00";
     std::wstring iconPath = guiExePath;
     std::wstring command = L"\"";
@@ -103,7 +103,7 @@ bool InstallPeInfoShellContextMenuForCurrentUser(const std::wstring& guiExePath,
 }
 
 bool UninstallPeInfoShellContextMenuForCurrentUser(std::wstring& error) {
-    const std::array<const wchar_t*, 4> exts = {L".exe", L".dll", L".sys", L".ocx"};
+    const std::array<const wchar_t*, 8> exts = {L".exe", L".dll", L".sys", L".ocx", L".node", L".cpl", L".scr", L".efi"};
     for (const wchar_t* ext : exts) {
         std::wstring keyPath = BuildBaseKeyPathForExt(ext);
         if (!DeleteTreeIfExists(keyPath, error)) {

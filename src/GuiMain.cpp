@@ -1546,7 +1546,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
                 case IDOK: {
                     bool enable = (SendMessageW(s->chkContextMenu, BM_GETCHECK, 0, 0) == BST_CHECKED);
                     std::wstring err;
-                    if (enable && !s->installedBefore) {
+                    if (enable) {
                         std::wstring guiPath = GetSelfExePath();
                         if (guiPath.empty()) {
                             MessageBoxError(hwnd, L"\u83b7\u53d6\u7a0b\u5e8f\u8def\u5f84\u5931\u8d25");
@@ -1556,7 +1556,10 @@ static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
                             MessageBoxError(hwnd, err.empty() ? L"\u5b89\u88c5\u53f3\u952e\u83dc\u5355\u5931\u8d25" : err);
                             return 0;
                         }
-                        MessageBoxW(hwnd, L"\u5df2\u5b89\u88c5\u53f3\u952e\u83dc\u5355", L"\u8bbe\u7f6e", MB_OK | MB_ICONINFORMATION);
+                        MessageBoxW(hwnd,
+                                    s->installedBefore ? L"\u5df2\u66f4\u65b0\u53f3\u952e\u83dc\u5355" : L"\u5df2\u5b89\u88c5\u53f3\u952e\u83dc\u5355",
+                                    L"\u8bbe\u7f6e",
+                                    MB_OK | MB_ICONINFORMATION);
                     }
                     if (!enable && s->installedBefore) {
                         if (!UninstallPeInfoShellContextMenuForCurrentUser(err)) {
@@ -2051,7 +2054,7 @@ static std::wstring PromptOpenFile(HWND hwnd) {
     ofn.hwndOwner = hwnd;
     ofn.lpstrFile = fileName;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrFilter = L"PE Files (*.exe;*.dll;*.sys;*.ocx)\0*.exe;*.dll;*.sys;*.ocx\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFilter = L"PE Files (*.exe;*.dll;*.sys;*.ocx;*.node;*.cpl;*.scr;*.efi)\0*.exe;*.dll;*.sys;*.ocx;*.node;*.cpl;*.scr;*.efi\0All Files (*.*)\0*.*\0";
     ofn.nFilterIndex = 1;
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
     if (!GetOpenFileNameW(&ofn)) {
