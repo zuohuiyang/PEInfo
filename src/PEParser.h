@@ -5,6 +5,7 @@
 #include <string>
 #include <memory>
 #include <array>
+#include <optional>
 
 struct PEImportFunction {
     std::string name;
@@ -22,7 +23,38 @@ struct PEExportFunction {
     std::string name;
     DWORD ordinal;
     DWORD rva;
+    DWORD fileOffset;
     bool hasName;
+    bool isForwarded;
+    std::string forwarder;
+    std::string forwarderDll;
+    std::string forwarderName;
+    bool forwarderIsOrdinal;
+    DWORD forwarderOrdinal;
+};
+
+struct PEExportDirectoryInfo {
+    bool present;
+    DWORD directoryRva;
+    DWORD directorySize;
+    DWORD directoryFileOffset;
+
+    DWORD characteristics;
+    DWORD timeDateStamp;
+    WORD majorVersion;
+    WORD minorVersion;
+    DWORD nameRva;
+    DWORD nameFileOffset;
+    std::string dllName;
+    DWORD base;
+    DWORD numberOfFunctions;
+    DWORD numberOfNames;
+    DWORD addressOfFunctionsRva;
+    DWORD addressOfFunctionsFileOffset;
+    DWORD addressOfNamesRva;
+    DWORD addressOfNamesFileOffset;
+    DWORD addressOfNameOrdinalsRva;
+    DWORD addressOfNameOrdinalsFileOffset;
 };
 
 struct PEHeaderInfo {
@@ -114,6 +146,7 @@ public:
     const std::vector<PEImportDLL>& GetImports() const { return m_imports; }
     const std::vector<PEImportDLL>& GetDelayImports() const { return m_delayImports; }
     const std::vector<PEExportFunction>& GetExports() const { return m_exports; }
+    const std::optional<PEExportDirectoryInfo>& GetExportDirectoryInfo() const { return m_exportDirectory; }
     std::wstring GetLastError() const { return m_lastError; }
     DWORD RVAToFileOffsetPublic(DWORD rva) const;
     bool ReadBytes(DWORD offset, void* buffer, size_t size) const;
@@ -145,5 +178,6 @@ private:
     std::vector<PEImportDLL> m_imports;
     std::vector<PEImportDLL> m_delayImports;
     std::vector<PEExportFunction> m_exports;
+    std::optional<PEExportDirectoryInfo> m_exportDirectory;
     std::wstring m_lastError;
 };

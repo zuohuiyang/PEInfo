@@ -144,6 +144,44 @@ std::string BuildJsonReport(const ReportOptions& opt,
     }
 
     if (opt.showExports) {
+        const auto& exportDirOpt = parser.GetExportDirectoryInfo();
+        oss << ",\"exportDirectory\":{";
+        if (!exportDirOpt.has_value() || !exportDirOpt->present) {
+            oss << "\"present\":false";
+        } else {
+            const auto& d = *exportDirOpt;
+            oss << "\"present\":true";
+            oss << ",\"directoryRva\":" << d.directoryRva;
+            oss << ",\"directorySize\":" << d.directorySize;
+            oss << ",\"directoryFileOffset\":" << d.directoryFileOffset;
+            oss << ",\"characteristics\":" << d.characteristics;
+            {
+                std::ostringstream raw;
+                raw << "0x" << std::hex << std::setw(8) << std::setfill('0') << d.timeDateStamp;
+                oss << ",\"timeDateStamp\":{";
+                oss << "\"raw\":" << JsonQuoteUtf8(raw.str());
+                if (opt.timeFormat != ReportTimeFormat::Raw) {
+                    oss << ",\"human\":" << JsonQuoteWide(FormatCoffTime(d.timeDateStamp, opt.timeFormat));
+                }
+                oss << "}";
+            }
+            oss << ",\"majorVersion\":" << d.majorVersion;
+            oss << ",\"minorVersion\":" << d.minorVersion;
+            oss << ",\"nameRva\":" << d.nameRva;
+            oss << ",\"nameFileOffset\":" << d.nameFileOffset;
+            oss << ",\"dllName\":" << JsonQuoteUtf8(d.dllName);
+            oss << ",\"base\":" << d.base;
+            oss << ",\"numberOfFunctions\":" << d.numberOfFunctions;
+            oss << ",\"numberOfNames\":" << d.numberOfNames;
+            oss << ",\"addressOfFunctionsRva\":" << d.addressOfFunctionsRva;
+            oss << ",\"addressOfFunctionsFileOffset\":" << d.addressOfFunctionsFileOffset;
+            oss << ",\"addressOfNamesRva\":" << d.addressOfNamesRva;
+            oss << ",\"addressOfNamesFileOffset\":" << d.addressOfNamesFileOffset;
+            oss << ",\"addressOfNameOrdinalsRva\":" << d.addressOfNameOrdinalsRva;
+            oss << ",\"addressOfNameOrdinalsFileOffset\":" << d.addressOfNameOrdinalsFileOffset;
+        }
+        oss << "}";
+
         const auto& exports = parser.GetExports();
         oss << ",\"exports\":[";
         for (size_t i = 0; i < exports.size(); ++i) {
@@ -152,7 +190,20 @@ std::string BuildJsonReport(const ReportOptions& opt,
             oss << "{";
             oss << "\"ordinal\":" << e.ordinal;
             oss << ",\"rva\":" << e.rva;
+            oss << ",\"fileOffset\":" << e.fileOffset;
             oss << ",\"name\":" << JsonQuoteUtf8(e.hasName ? e.name : std::string());
+            oss << ",\"isForwarded\":" << (e.isForwarded ? "true" : "false");
+            if (e.isForwarded) {
+                oss << ",\"forwarder\":" << JsonQuoteUtf8(e.forwarder);
+                if (!e.forwarderDll.empty()) {
+                    oss << ",\"forwarderDll\":" << JsonQuoteUtf8(e.forwarderDll);
+                }
+                if (e.forwarderIsOrdinal) {
+                    oss << ",\"forwarderOrdinal\":" << e.forwarderOrdinal;
+                } else if (!e.forwarderName.empty()) {
+                    oss << ",\"forwarderName\":" << JsonQuoteUtf8(e.forwarderName);
+                }
+            }
             oss << "}";
         }
         oss << "]";

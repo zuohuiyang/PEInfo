@@ -84,6 +84,45 @@ static void PrintImportsSummary(std::wostream& os, const std::wstring& title, co
     }
 }
 
+static void PrintExportDirectory(std::wostream& os, const PEParser& parser, const ReportOptions& opt) {
+    const auto& dOpt = parser.GetExportDirectoryInfo();
+    if (!dOpt.has_value() || !dOpt->present) {
+        os << L"Export Directory: (none)\n";
+        return;
+    }
+
+    const auto& d = *dOpt;
+    os << L"Export Directory:\n";
+    os << L"  DirectoryRva: 0x" << std::hex << std::setw(8) << std::setfill(L'0') << d.directoryRva
+       << L"  Size: 0x" << std::setw(8) << d.directorySize << std::dec << std::setfill(L' ') << L"\n";
+    os << L"  DirectoryOff: 0x" << std::hex << std::setw(8) << std::setfill(L'0') << d.directoryFileOffset << std::dec << std::setfill(L' ') << L"\n";
+    os << L"  Characteristics: 0x" << std::hex << std::setw(8) << std::setfill(L'0') << d.characteristics << std::dec << std::setfill(L' ') << L"\n";
+    if (opt.timeFormat == ReportTimeFormat::Raw) {
+        os << L"  TimeDateStamp: 0x" << std::hex << std::setw(8) << std::setfill(L'0') << d.timeDateStamp << std::dec << std::setfill(L' ') << L"\n";
+    } else {
+        os << L"  TimeDateStamp: " << FormatCoffTime(d.timeDateStamp, opt.timeFormat) << L"  (0x"
+           << std::hex << std::setw(8) << std::setfill(L'0') << d.timeDateStamp << std::dec << std::setfill(L' ') << L")\n";
+    }
+    os << L"  MajorVersion: 0x" << std::hex << std::setw(4) << std::setfill(L'0') << d.majorVersion
+       << L"  MinorVersion: 0x" << std::setw(4) << d.minorVersion << std::dec << std::setfill(L' ') << L"\n";
+    os << L"  NameRva: 0x" << std::hex << std::setw(8) << std::setfill(L'0') << d.nameRva;
+    if (d.nameFileOffset != 0) {
+        os << L"  NameOff: 0x" << std::setw(8) << d.nameFileOffset;
+    }
+    os << std::dec << std::setfill(L' ') << L"\n";
+    os << L"  DllName: " << ToWStringUtf8BestEffort(d.dllName) << L"\n";
+    os << L"  Base: " << d.base << L"  NumberOfFunctions: " << d.numberOfFunctions << L"  NumberOfNames: " << d.numberOfNames << L"\n";
+    os << L"  AddressOfFunctions: 0x" << std::hex << std::setw(8) << std::setfill(L'0') << d.addressOfFunctionsRva;
+    if (d.addressOfFunctionsFileOffset != 0) os << L"  Off: 0x" << std::setw(8) << d.addressOfFunctionsFileOffset;
+    os << L"\n";
+    os << L"  AddressOfNames:    0x" << std::hex << std::setw(8) << std::setfill(L'0') << d.addressOfNamesRva;
+    if (d.addressOfNamesFileOffset != 0) os << L"  Off: 0x" << std::setw(8) << d.addressOfNamesFileOffset;
+    os << L"\n";
+    os << L"  AddressOfOrdinals: 0x" << std::hex << std::setw(8) << std::setfill(L'0') << d.addressOfNameOrdinalsRva;
+    if (d.addressOfNameOrdinalsFileOffset != 0) os << L"  Off: 0x" << std::setw(8) << d.addressOfNameOrdinalsFileOffset;
+    os << std::dec << std::setfill(L' ') << L"\n";
+}
+
 static void PrintExportsSummary(std::wostream& os, const std::vector<PEExportFunction>& exports, size_t maxExports) {
     if (exports.empty()) {
         os << L"Exports: (none)\n";
@@ -91,16 +130,24 @@ static void PrintExportsSummary(std::wostream& os, const std::vector<PEExportFun
     }
 
     os << L"Exports:\n";
-    os << L"  Ordinal  RVA       Name\n";
+    os << L"  Ordinal  RVA       Offset    Name  Forwarder\n";
     size_t shown = 0;
     for (const auto& e : exports) {
         if (shown >= maxExports) {
             os << L"  ...\n";
             break;
         }
-        os << L"  " << std::setw(7) << e.ordinal << L"  0x" << std::hex << std::setw(8) << std::setfill(L'0') << e.rva
-           << std::dec << std::setfill(L' ') << L"  "
-           << (e.hasName ? ToWStringUtf8BestEffort(e.name) : L"(no-name)") << L"\n";
+        os << L"  " << std::setw(7) << e.ordinal << L"  0x" << std::hex << std::setw(8) << std::setfill(L'0') << e.rva;
+        if (e.fileOffset != 0) {
+            os << L"  0x" << std::setw(8) << e.fileOffset;
+        } else {
+            os << L"  " << std::setw(10) << L"";
+        }
+        os << std::dec << std::setfill(L' ') << L"  " << (e.hasName ? ToWStringUtf8BestEffort(e.name) : L"(no-name)");
+        if (e.isForwarded && !e.forwarder.empty()) {
+            os << L"  " << ToWStringUtf8BestEffort(e.forwarder);
+        }
+        os << L"\n";
         ++shown;
     }
 }
@@ -350,6 +397,7 @@ std::wstring BuildTextReport(const ReportOptions& opt,
             PrintImportsSummary(out, L"Delay-Imports", parser.GetDelayImports(), importMaxPerDll);
         }
         if (opt.showExports) {
+            PrintExportDirectory(out, parser, opt);
             PrintExportsSummary(out, parser.GetExports(), maxExports);
         }
         if (opt.showResources) {

@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "PEParser.h"
+#include <cstdlib>
 #include <sstream>
 
 PEParser::PEParser()
@@ -49,6 +50,7 @@ void PEParser::UnloadFile() {
     m_imports.clear();
     m_delayImports.clear();
     m_exports.clear();
+    m_exportDirectory.reset();
     m_lastError.clear();
 }
 
@@ -556,6 +558,7 @@ bool PEParser::ParseDelayImports() {
 
 bool PEParser::ParseExports() {
     m_exports.clear();
+    m_exportDirectory.reset();
 
     IMAGE_DATA_DIRECTORY dir = {};
     if (m_isPE32Plus) {
@@ -580,6 +583,33 @@ bool PEParser::ParseExports() {
         return false;
     }
 
+    PEExportDirectoryInfo info = {};
+    info.present = true;
+    info.directoryRva = dir.VirtualAddress;
+    info.directorySize = dir.Size;
+    info.directoryFileOffset = exportOffset;
+    info.characteristics = exp.Characteristics;
+    info.timeDateStamp = exp.TimeDateStamp;
+    info.majorVersion = exp.MajorVersion;
+    info.minorVersion = exp.MinorVersion;
+    info.nameRva = exp.Name;
+    info.base = exp.Base;
+    info.numberOfFunctions = exp.NumberOfFunctions;
+    info.numberOfNames = exp.NumberOfNames;
+    info.addressOfFunctionsRva = exp.AddressOfFunctions;
+    info.addressOfNamesRva = exp.AddressOfNames;
+    info.addressOfNameOrdinalsRva = exp.AddressOfNameOrdinals;
+
+    info.nameFileOffset = (exp.Name != 0) ? RVAToFileOffset(exp.Name) : 0;
+    if (info.nameFileOffset != 0) {
+        info.dllName = ReadString(info.nameFileOffset);
+    }
+    info.addressOfFunctionsFileOffset = (exp.AddressOfFunctions != 0) ? RVAToFileOffset(exp.AddressOfFunctions) : 0;
+    info.addressOfNamesFileOffset = (exp.AddressOfNames != 0) ? RVAToFileOffset(exp.AddressOfNames) : 0;
+    info.addressOfNameOrdinalsFileOffset = (exp.AddressOfNameOrdinals != 0) ? RVAToFileOffset(exp.AddressOfNameOrdinals) : 0;
+
+    m_exportDirectory = info;
+
     if (exp.NumberOfFunctions == 0) {
         return true;
     }
@@ -600,8 +630,58 @@ bool PEParser::ParseExports() {
     for (DWORD i = 0; i < exp.NumberOfFunctions; ++i) {
         m_exports[i].ordinal = exp.Base + i;
         m_exports[i].rva = functionRvas[i];
+        m_exports[i].fileOffset = (m_exports[i].rva != 0) ? RVAToFileOffset(m_exports[i].rva) : 0;
         m_exports[i].hasName = false;
         m_exports[i].name.clear();
+        m_exports[i].isForwarded = false;
+        m_exports[i].forwarder.clear();
+        m_exports[i].forwarderDll.clear();
+        m_exports[i].forwarderName.clear();
+        m_exports[i].forwarderIsOrdinal = false;
+        m_exports[i].forwarderOrdinal = 0;
+    }
+
+    for (DWORD i = 0; i < exp.NumberOfFunctions; ++i) {
+        DWORD rva = m_exports[i].rva;
+        if (rva == 0) {
+            continue;
+        }
+        DWORD dirStart = dir.VirtualAddress;
+        DWORD dirEnd = dir.VirtualAddress + dir.Size;
+        if (rva < dirStart || rva >= dirEnd) {
+            continue;
+        }
+
+        DWORD fwdOffset = RVAToFileOffset(rva);
+        if (fwdOffset == 0) {
+            continue;
+        }
+        std::string fwd = ReadString(fwdOffset);
+        if (fwd.empty()) {
+            continue;
+        }
+
+        m_exports[i].isForwarded = true;
+        m_exports[i].forwarder = fwd;
+
+        size_t dot = fwd.find_last_of('.');
+        if (dot != std::string::npos && dot > 0 && dot + 1 < fwd.size()) {
+            m_exports[i].forwarderDll = fwd.substr(0, dot);
+            std::string sym = fwd.substr(dot + 1);
+            if (!sym.empty() && sym[0] == '#') {
+                const char* numStart = sym.c_str() + 1;
+                char* endPtr = nullptr;
+                unsigned long ord = strtoul(numStart, &endPtr, 10);
+                if (endPtr != nullptr && endPtr != numStart && *endPtr == '\0') {
+                    m_exports[i].forwarderIsOrdinal = true;
+                    m_exports[i].forwarderOrdinal = static_cast<DWORD>(ord);
+                } else {
+                    m_exports[i].forwarderName = sym;
+                }
+            } else {
+                m_exports[i].forwarderName = sym;
+            }
+        }
     }
 
     if (exp.NumberOfNames == 0) {
