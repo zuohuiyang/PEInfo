@@ -2374,12 +2374,16 @@ static void UpdateLayout(GuiState* s) {
     int iconBtn = MulDiv(32, static_cast<int>(s->dpi), 96);
     int fileInfoY = pad;
     int fileInfoH = MulDiv(24, static_cast<int>(s->dpi), 96);
-    int btnGap = MulDiv(6, static_cast<int>(s->dpi), 96);
+    int btnGap = MulDiv(16, static_cast<int>(s->dpi), 96);
     int btnY = fileInfoY - MulDiv(4, static_cast<int>(s->dpi), 96);
     int gearX = w - pad - iconBtn;
     int openSmallX = gearX - btnGap - iconBtn;
     MoveWindow(s->btnOpenSmall, openSmallX, btnY, iconBtn, iconBtn, TRUE);
     MoveWindow(s->btnSettingsGear, gearX, btnY, iconBtn, iconBtn, TRUE);
+    
+    // Force repaint of the button area to prevent artifacts
+    RECT btnArea = {openSmallX - btnGap, btnY, gearX + iconBtn, btnY + iconBtn};
+    InvalidateRect(s->hwnd, &btnArea, TRUE);
 
     int fileInfoW = w - 2 * pad - (2 * iconBtn + btnGap) - pad;
     if (fileInfoW < MulDiv(120, static_cast<int>(s->dpi), 96)) {
@@ -2955,6 +2959,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 return reinterpret_cast<INT_PTR>(s->regexErrorBrush);
             }
             break;
+        }
+        case WM_GETMINMAXINFO: {
+            auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+            UINT dpi = GetBestWindowDpi(hwnd);
+            mmi->ptMinTrackSize.x = MulDiv(600, static_cast<int>(dpi), 96);
+            mmi->ptMinTrackSize.y = MulDiv(450, static_cast<int>(dpi), 96);
+            return 0;
         }
         case WM_SIZE: {
             UpdateLayout(s);
@@ -3578,12 +3589,26 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             WINDOWPLACEMENT wp = {};
             wp.length = sizeof(wp);
             if (GetWindowPlacement(hwnd, &wp)) {
-                int w = wp.rcNormalPosition.right - wp.rcNormalPosition.left;
-                int h = wp.rcNormalPosition.bottom - wp.rcNormalPosition.top;
                 std::wstring ini = GetPeInfoSettingsIniPath();
                 if (!ini.empty()) {
-                    WritePrivateProfileStringW(L"Window", L"Width", std::to_wstring(w).c_str(), ini.c_str());
-                    WritePrivateProfileStringW(L"Window", L"Height", std::to_wstring(h).c_str(), ini.c_str());
+                    RECT rc = wp.rcNormalPosition;
+                    int w = rc.right - rc.left;
+                    int h = rc.bottom - rc.top;
+                    int x = rc.left;
+                    int y = rc.top;
+                    int max = (wp.showCmd == SW_SHOWMAXIMIZED) ? 1 : 0;
+                    
+                    wchar_t buf[32];
+                    swprintf_s(buf, L"%d", w);
+                    WritePrivateProfileStringW(L"Window", L"Width", buf, ini.c_str());
+                    swprintf_s(buf, L"%d", h);
+                    WritePrivateProfileStringW(L"Window", L"Height", buf, ini.c_str());
+                    swprintf_s(buf, L"%d", x);
+                    WritePrivateProfileStringW(L"Window", L"X", buf, ini.c_str());
+                    swprintf_s(buf, L"%d", y);
+                    WritePrivateProfileStringW(L"Window", L"Y", buf, ini.c_str());
+                    swprintf_s(buf, L"%d", max);
+                    WritePrivateProfileStringW(L"Window", L"Maximized", buf, ini.c_str());
                 }
             }
 
@@ -3740,6 +3765,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
 
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = kMainClassName;
@@ -3747,27 +3773,37 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     RegisterClassExW(&wc);
 
-    int winW = 1100;
-    int winH = 720;
-    std::wstring ini = GetPeInfoSettingsIniPath();
-    if (!ini.empty()) {
-        int w = GetPrivateProfileIntW(L"Window", L"Width", 0, ini.c_str());
-        int h = GetPrivateProfileIntW(L"Window", L"Height", 0, ini.c_str());
-        if (w >= 400 && h >= 300) {
-            winW = w;
-            winH = h;
-        }
-    }
-
-    HWND hwnd = CreateWindowExW(0, kMainClassName, L"PEInfo v1.0", WS_OVERLAPPEDWINDOW,
-                                CW_USEDEFAULT, CW_USEDEFAULT, winW, winH,
+    HWND hwnd = CreateWindowExW(0, kMainClassName, L"PEInfo v1.0", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                                CW_USEDEFAULT, CW_USEDEFAULT, 1100, 720,
                                 nullptr, nullptr, hInstance, &state);
     if (!hwnd) {
         return 1;
     }
     state.hwnd = hwnd;
 
-    if (nCmdShow != SW_SHOWMAXIMIZED && nCmdShow != SW_MAXIMIZE && nCmdShow != SW_MINIMIZE && nCmdShow != SW_SHOWMINIMIZED && nCmdShow != SW_FORCEMINIMIZE) {
+    bool restored = false;
+    std::wstring ini = GetPeInfoSettingsIniPath();
+    if (!ini.empty()) {
+        int w = GetPrivateProfileIntW(L"Window", L"Width", 0, ini.c_str());
+        int h = GetPrivateProfileIntW(L"Window", L"Height", 0, ini.c_str());
+        int x = GetPrivateProfileIntW(L"Window", L"X", -32000, ini.c_str());
+        int y = GetPrivateProfileIntW(L"Window", L"Y", -32000, ini.c_str());
+        int max = GetPrivateProfileIntW(L"Window", L"Maximized", 0, ini.c_str());
+
+        if (w > 0 && h > 0) {
+            if (x != -32000 && y != -32000) {
+                SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER);
+                restored = true;
+            } else {
+                SetWindowPos(hwnd, nullptr, 0, 0, w, h, SWP_NOZORDER | SWP_NOMOVE);
+            }
+            if (max) {
+                nCmdShow = SW_MAXIMIZE;
+            }
+        }
+    }
+
+    if (!restored && nCmdShow != SW_SHOWMAXIMIZED && nCmdShow != SW_MAXIMIZE && nCmdShow != SW_MINIMIZE && nCmdShow != SW_SHOWMINIMIZED && nCmdShow != SW_FORCEMINIMIZE) {
         CenterWindowOnWorkArea(hwnd);
     }
 

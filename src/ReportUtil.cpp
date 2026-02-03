@@ -1,9 +1,30 @@
 #include "stdafx.h"
 #include "ReportUtil.h"
 
+#include <shlobj.h>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+
+std::wstring GetPeInfoSettingsIniPath() {
+    PWSTR roaming = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, nullptr, &roaming)) || roaming == nullptr) {
+        return {};
+    }
+    std::wstring base = roaming;
+    CoTaskMemFree(roaming);
+
+    std::wstring dir = base;
+    if (!dir.empty() && dir.back() != L'\\') {
+        dir += L'\\';
+    }
+    dir += L"PEInfo";
+    SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
+
+    std::wstring ini = dir;
+    ini += L"\\settings.ini";
+    return ini;
+}
 
 std::wstring ToWStringUtf8BestEffort(const std::string& s) {
     if (s.empty()) {
@@ -83,26 +104,6 @@ std::wstring CoffMachineToName(WORD machine) {
         case IMAGE_FILE_MACHINE_IA64: return L"IA64";
     }
     return L"Unknown";
-}
-
-std::wstring GetPeInfoSettingsIniPath() {
-    PWSTR roaming = nullptr;
-    if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, nullptr, &roaming)) || roaming == nullptr) {
-        return {};
-    }
-    std::wstring base = roaming;
-    CoTaskMemFree(roaming);
-
-    std::wstring dir = base;
-    if (!dir.empty() && dir.back() != L'\\') {
-        dir += L'\\';
-    }
-    dir += L"PEInfo";
-    SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
-
-    std::wstring ini = dir;
-    ini += L"\\settings.ini";
-    return ini;
 }
 
 std::string WStringToUtf8(const std::wstring& w) {
