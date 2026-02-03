@@ -85,6 +85,26 @@ std::wstring CoffMachineToName(WORD machine) {
     return L"Unknown";
 }
 
+std::wstring GetPeInfoSettingsIniPath() {
+    PWSTR roaming = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, nullptr, &roaming)) || roaming == nullptr) {
+        return {};
+    }
+    std::wstring base = roaming;
+    CoTaskMemFree(roaming);
+
+    std::wstring dir = base;
+    if (!dir.empty() && dir.back() != L'\\') {
+        dir += L'\\';
+    }
+    dir += L"PEInfo";
+    SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
+
+    std::wstring ini = dir;
+    ini += L"\\settings.ini";
+    return ini;
+}
+
 std::string WStringToUtf8(const std::wstring& w) {
     if (w.empty()) {
         return {};

@@ -3575,6 +3575,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
         case WM_DESTROY: {
+            WINDOWPLACEMENT wp = {};
+            wp.length = sizeof(wp);
+            if (GetWindowPlacement(hwnd, &wp)) {
+                int w = wp.rcNormalPosition.right - wp.rcNormalPosition.left;
+                int h = wp.rcNormalPosition.bottom - wp.rcNormalPosition.top;
+                std::wstring ini = GetPeInfoSettingsIniPath();
+                if (!ini.empty()) {
+                    WritePrivateProfileStringW(L"Window", L"Width", std::to_wstring(w).c_str(), ini.c_str());
+                    WritePrivateProfileStringW(L"Window", L"Height", std::to_wstring(h).c_str(), ini.c_str());
+                }
+            }
+
             KillTimer(hwnd, kTimerStringsHistorySave);
             if (s->stringsHistoryDirty) {
                 s->stringsHistory.Save();
@@ -3735,8 +3747,20 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     RegisterClassExW(&wc);
 
+    int winW = 1100;
+    int winH = 720;
+    std::wstring ini = GetPeInfoSettingsIniPath();
+    if (!ini.empty()) {
+        int w = GetPrivateProfileIntW(L"Window", L"Width", 0, ini.c_str());
+        int h = GetPrivateProfileIntW(L"Window", L"Height", 0, ini.c_str());
+        if (w >= 400 && h >= 300) {
+            winW = w;
+            winH = h;
+        }
+    }
+
     HWND hwnd = CreateWindowExW(0, kMainClassName, L"PEInfo v1.0", WS_OVERLAPPEDWINDOW,
-                                CW_USEDEFAULT, CW_USEDEFAULT, 1100, 720,
+                                CW_USEDEFAULT, CW_USEDEFAULT, winW, winH,
                                 nullptr, nullptr, hInstance, &state);
     if (!hwnd) {
         return 1;

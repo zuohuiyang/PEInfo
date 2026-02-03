@@ -14,5 +14,7 @@ std::wstring HexU64(ULONGLONG v, int width);
 
 std::wstring CoffMachineToName(WORD machine);
 
+std::wstring GetPeInfoSettingsIniPath();
+
 bool WriteAllBytes(const std::wstring& path, const std::string& bytes);
 
