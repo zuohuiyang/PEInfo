@@ -46,6 +46,8 @@ static const UINT_PTR kTimerStringsFilterWork = 4;
 static const UINT_PTR kTimerStringsHistorySave = 5;
 static const WPARAM IDM_SYS_SETTINGS = 0x1FF0;
 static const WPARAM IDM_SYS_CANCEL = 0x1FF2;
+static const size_t kStringsUiMaxRows = 200000;
+static const int kStringsUiPageSize = 50000;
 
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 DECLARE_HANDLE(DPI_AWARENESS_CONTEXT);
@@ -88,6 +90,9 @@ enum : UINT {
     IDC_STRINGS_HISTORY_TAG5 = 2215,
     IDC_STRINGS_HISTORY_TAG6 = 2216,
     IDC_STRINGS_HISTORY_TAG7 = 2217,
+    IDC_STRINGS_PAGE_PREV = 2218,
+    IDC_STRINGS_PAGE_NEXT = 2219,
+    IDC_STRINGS_PAGE_LABEL = 2220,
     IDC_ABOUT = 2011,
     IDC_ABOUT_INFO = 2012,
     IDC_ABOUT_LINK = 2013
@@ -237,6 +242,13 @@ struct GuiState {
     };
     std::vector<StringsRow> stringsAllRows;
     std::vector<int> stringsVisible;
+    std::vector<int> stringsVisibleAll;
+    HWND stringsPagePrev = nullptr;
+    HWND stringsPageNext = nullptr;
+    HWND stringsPageLabel = nullptr;
+    int stringsPageIndex = 0;
+    int stringsPageCount = 0;
+    int stringsPageSize = kStringsUiPageSize;
     bool stringsFilterRunning = false;
     size_t stringsFilterPos = 0;
     uint64_t stringsFilterGen = 0;
@@ -292,6 +304,7 @@ static UINT GetBestWindowDpi(HWND hwnd);
 static HFONT CreateUiFontForDpi(UINT dpi);
 static void FitImportsDllColumns(GuiState* s);
 static void FitImportsFuncColumns(GuiState* s);
+static void UpdateStringsDisplayCount(GuiState* s);
 static void ApplyStringsFilterNow(GuiState* s);
 
 static void CenterWindowOnWorkArea(HWND hwnd) {
@@ -955,6 +968,74 @@ static void UpdateStringsHistoryBar(GuiState* s) {
     ShowWindow(s->stringsHistoryClearBtn, (!s->stringsHistoryDisplay.empty()) ? SW_SHOW : SW_HIDE);
 }
 
+static void UpdateStringsDisplayCount(GuiState* s) {
+    if (!s || !s->pageStrings) {
+        return;
+    }
+    size_t total = s->stringsVisibleAll.size();
+    size_t displayLimit = total;
+    if (displayLimit > kStringsUiMaxRows) {
+        displayLimit = kStringsUiMaxRows;
+    }
+    int pageSize = s->stringsPageSize;
+    if (pageSize <= 0) {
+        pageSize = kStringsUiPageSize;
+    }
+    size_t pageSizeSz = static_cast<size_t>(pageSize);
+    size_t pageCount = 0;
+    if (displayLimit > 0 && pageSizeSz > 0) {
+        pageCount = (displayLimit + pageSizeSz - 1) / pageSizeSz;
+    }
+    if (pageCount == 0) {
+        s->stringsPageIndex = 0;
+    } else if (static_cast<size_t>(s->stringsPageIndex) >= pageCount) {
+        s->stringsPageIndex = 0;
+    }
+    s->stringsPageCount = static_cast<int>(pageCount);
+
+    size_t pageStart = 0;
+    size_t pageEnd = 0;
+    if (pageCount > 0) {
+        pageStart = static_cast<size_t>(s->stringsPageIndex) * pageSizeSz;
+        if (pageStart > displayLimit) {
+            pageStart = displayLimit;
+        }
+        pageEnd = pageStart + pageSizeSz;
+        if (pageEnd > displayLimit) {
+            pageEnd = displayLimit;
+        }
+    }
+
+    s->stringsVisible.clear();
+    if (pageEnd > pageStart) {
+        s->stringsVisible.reserve(pageEnd - pageStart);
+        for (size_t i = pageStart; i < pageEnd; ++i) {
+            s->stringsVisible.push_back(s->stringsVisibleAll[i]);
+        }
+    }
+    ListView_SetItemCountEx(s->pageStrings, static_cast<int>(s->stringsVisible.size()), LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
+
+    if (s->stringsPagePrev) {
+        EnableWindow(s->stringsPagePrev, (pageCount > 0 && s->stringsPageIndex > 0) ? TRUE : FALSE);
+    }
+    if (s->stringsPageNext) {
+        EnableWindow(s->stringsPageNext, (pageCount > 0 && (static_cast<size_t>(s->stringsPageIndex + 1) < pageCount)) ? TRUE : FALSE);
+    }
+    if (s->stringsPageLabel) {
+        std::wostringstream out;
+        if (displayLimit == 0) {
+            out << L"0 / 0";
+        } else {
+            out << L"\u7b2c " << (s->stringsPageIndex + 1) << L" / " << pageCount << L" \u9875";
+            out << L"  \u663e\u793a " << (pageStart + 1) << L"-" << pageEnd << L" / " << displayLimit;
+            if (total > displayLimit) {
+                out << L"  \u603b " << total;
+            }
+        }
+        SetWindowTextWString(s->stringsPageLabel, out.str());
+    }
+}
+
 static void ApplyStringsHistoryEntry(GuiState* s, const StringsSearchHistoryEntry& e) {
     if (!s) {
         return;
@@ -1018,6 +1099,11 @@ static void ApplyStringsFilterNow(GuiState* s) {
     s->stringsFilterPos = 0;
     s->stringsFilterResult.clear();
     s->stringsFilterSeen.clear();
+    s->stringsVisibleAll.clear();
+    s->stringsVisible.clear();
+    s->stringsPageIndex = 0;
+    s->stringsPageCount = 0;
+    UpdateStringsDisplayCount(s);
 
     std::wstring qRaw = GetControlText(s->stringsSearchEdit);
     bool useRegex = IsStringsRegexEnabled(s);
@@ -1128,10 +1214,10 @@ static void ContinueStringsFilterWork(GuiState* s) {
     }
     s->stringsFilterRunning = false;
     KillTimer(s->hwnd, kTimerStringsFilterWork);
-    s->stringsVisible = std::move(s->stringsFilterResult);
+    s->stringsVisibleAll = std::move(s->stringsFilterResult);
     s->stringsFilterResult.clear();
     s->stringsFilterSeen.clear();
-    ListView_SetItemCountEx(s->pageStrings, static_cast<int>(s->stringsVisible.size()), LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
+    UpdateStringsDisplayCount(s);
     InvalidateRect(s->pageStrings, nullptr, TRUE);
     UpdateStringsDetail(s);
 }
@@ -1791,6 +1877,9 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
     ShowWindow(s->stringsMinLenEdit, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsUniqueCheck, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsHistoryLabel, showStringsControls ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->stringsPagePrev, showStringsControls ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->stringsPageNext, showStringsControls ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->stringsPageLabel, showStringsControls ? SW_SHOW : SW_HIDE);
     if (!showStringsControls) {
         for (HWND h : s->stringsHistoryTags) {
             ShowWindow(h, SW_HIDE);
@@ -1843,6 +1932,9 @@ static void RefreshAllViews(GuiState* s) {
         s->exportsAllRows.clear();
         s->stringsAllRows.clear();
         s->stringsVisible.clear();
+        s->stringsVisibleAll.clear();
+        s->stringsPageIndex = 0;
+        s->stringsPageCount = 0;
         if (s->stringsFilterRunning) {
             s->stringsFilterRunning = false;
             KillTimer(s->hwnd, kTimerStringsFilterWork);
@@ -1851,6 +1943,7 @@ static void RefreshAllViews(GuiState* s) {
         PopulatePdb(s->pagePdb, s);
         SetWindowTextWString(s->pageSignature, L"");
         SetWindowTextWString(s->pageHash, L"");
+        UpdateStringsDisplayCount(s);
         UpdateFileInfo(s);
         return;
     }
@@ -2107,12 +2200,16 @@ static void StartStringsScan(GuiState* s) {
     }
     s->stringsAllRows.clear();
     s->stringsVisible.clear();
+    s->stringsVisibleAll.clear();
+    s->stringsPageIndex = 0;
+    s->stringsPageCount = 0;
     if (s->stringsFilterRunning) {
         s->stringsFilterRunning = false;
         KillTimer(s->hwnd, kTimerStringsFilterWork);
     }
     ListView_SetItemCountEx(s->pageStrings, 0, LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
     UpdateStringsDetail(s);
+    UpdateStringsDisplayCount(s);
  
 
     StringsScanOptions opt;
@@ -2374,16 +2471,12 @@ static void UpdateLayout(GuiState* s) {
     int iconBtn = MulDiv(32, static_cast<int>(s->dpi), 96);
     int fileInfoY = pad;
     int fileInfoH = MulDiv(24, static_cast<int>(s->dpi), 96);
-    int btnGap = MulDiv(16, static_cast<int>(s->dpi), 96);
+    int btnGap = MulDiv(6, static_cast<int>(s->dpi), 96);
     int btnY = fileInfoY - MulDiv(4, static_cast<int>(s->dpi), 96);
     int gearX = w - pad - iconBtn;
     int openSmallX = gearX - btnGap - iconBtn;
     MoveWindow(s->btnOpenSmall, openSmallX, btnY, iconBtn, iconBtn, TRUE);
     MoveWindow(s->btnSettingsGear, gearX, btnY, iconBtn, iconBtn, TRUE);
-    
-    // Force repaint of the button area to prevent artifacts
-    RECT btnArea = {openSmallX - btnGap, btnY, gearX + iconBtn, btnY + iconBtn};
-    InvalidateRect(s->hwnd, &btnArea, TRUE);
 
     int fileInfoW = w - 2 * pad - (2 * iconBtn + btnGap) - pad;
     if (fileInfoW < MulDiv(120, static_cast<int>(s->dpi), 96)) {
@@ -2423,11 +2516,14 @@ static void UpdateLayout(GuiState* s) {
     int stringsHistoryGapY = MulDiv(6, static_cast<int>(s->dpi), 96);
     int stringsHistoryY = stringsBarY + stringsBarH + stringsHistoryGapY;
     int stringsHistoryH = filterH;
+    int stringsPageBarGapY = MulDiv(6, static_cast<int>(s->dpi), 96);
+    int stringsPageBarH = filterH;
     int stringsListY = stringsHistoryY + stringsHistoryH + pad;
-    int stringsListH = pageH - (stringsBarH + stringsHistoryGapY + stringsHistoryH + pad);
+    int stringsListH = pageH - (stringsBarH + stringsHistoryGapY + stringsHistoryH + pad + stringsPageBarGapY + stringsPageBarH);
     if (stringsListH < MulDiv(80, static_cast<int>(s->dpi), 96)) {
         stringsListH = MulDiv(80, static_cast<int>(s->dpi), 96);
     }
+    int stringsPageBarY = stringsListY + stringsListH + stringsPageBarGapY;
 
     int stringsIconW = filterLabelW;
     int typeLabelW = MulDiv(46, static_cast<int>(s->dpi), 96);
@@ -2491,6 +2587,23 @@ static void UpdateLayout(GuiState* s) {
         int x = historyTagsX + i * (historyTagW + historyTagGap);
         MoveWindow(s->stringsHistoryTags[i], x, historyLabelY, historyTagW, stringsHistoryH, TRUE);
     }
+
+    int pageGap = MulDiv(6, static_cast<int>(s->dpi), 96);
+    int pageBtnW = MulDiv(72, static_cast<int>(s->dpi), 96);
+    int pageLabelW = MulDiv(200, static_cast<int>(s->dpi), 96);
+    int pageRightX = pageRc.left + pageW;
+    int pageNextX = pageRightX - pageBtnW;
+    int pagePrevX = pageNextX - pageGap - pageBtnW;
+    int pageLabelX = pagePrevX - pageGap - pageLabelW;
+    if (pageLabelX < pageRc.left) {
+        pageLabelX = pageRc.left;
+        pageLabelW = pagePrevX - pageGap - pageLabelX;
+        if (pageLabelW < 0) pageLabelW = 0;
+    }
+    MoveWindow(s->stringsPagePrev, pagePrevX, stringsPageBarY, pageBtnW, stringsPageBarH, TRUE);
+    MoveWindow(s->stringsPageNext, pageNextX, stringsPageBarY, pageBtnW, stringsPageBarH, TRUE);
+    MoveWindow(s->stringsPageLabel, pageLabelX, stringsPageBarY, pageLabelW, stringsPageBarH, TRUE);
+
     int importsY = pageRc.top + filterH + pad;
     int importsH = pageH - filterH - pad;
     int splitGap = pad;
@@ -2656,6 +2769,9 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->stringsUniqueCheck,
         s->stringsHistoryLabel,
         s->stringsHistoryClearBtn,
+        s->stringsPagePrev,
+        s->stringsPageNext,
+        s->stringsPageLabel,
     };
     for (HWND hwnd : controls) {
         if (hwnd) {
@@ -2706,6 +2822,13 @@ static void ApplyUiFontAndTheme(GuiState* s) {
     ListView_SetExtendedListViewStyleEx(s->pageImports, ex, ex);
     ListView_SetExtendedListViewStyleEx(s->pageExports, ex, ex);
     ListView_SetExtendedListViewStyleEx(s->pageStrings, ex, ex);
+}
+
+static LRESULT CALLBACK StringsListSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) {
+    if (msg == WM_GETOBJECT) {
+        return 0;
+    }
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -2849,6 +2972,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->stringsHistoryTags[6] = CreateWindowW(L"BUTTON", L"", tagStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_TAG6), nullptr, nullptr);
             s->stringsHistoryTags[7] = CreateWindowW(L"BUTTON", L"", tagStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_HISTORY_TAG7), nullptr, nullptr);
 
+            s->stringsPagePrev = CreateWindowW(L"BUTTON", L"\u4e0a\u4e00\u9875", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_PAGE_PREV), nullptr, nullptr);
+            s->stringsPageNext = CreateWindowW(L"BUTTON", L"\u4e0b\u4e00\u9875", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_PAGE_NEXT), nullptr, nullptr);
+            s->stringsPageLabel = CreateWindowW(L"STATIC", L"", WS_CHILD | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_PAGE_LABEL), nullptr, nullptr);
+            SetWindowSubclass(s->pageStrings, StringsListSubclassProc, 1, 0);
+
             auto colW = [&](int base) { return MulDiv(base, static_cast<int>(s->dpi), 96); };
             AddListViewColumn(s->pageHeaders, 0, colW(220), L"Field");
             AddListViewColumn(s->pageHeaders, 1, colW(560), L"Value");
@@ -2942,7 +3070,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 ctrl != s->stringsSearchLabel &&
                 ctrl != s->stringsTypeLabel &&
                 ctrl != s->stringsMinLenLabel &&
-                ctrl != s->stringsHistoryLabel) {
+                ctrl != s->stringsHistoryLabel &&
+                ctrl != s->stringsPageLabel) {
                 break;
             }
             HDC dc = reinterpret_cast<HDC>(wParam);
@@ -2959,13 +3088,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 return reinterpret_cast<INT_PTR>(s->regexErrorBrush);
             }
             break;
-        }
-        case WM_GETMINMAXINFO: {
-            auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
-            UINT dpi = GetBestWindowDpi(hwnd);
-            mmi->ptMinTrackSize.x = MulDiv(600, static_cast<int>(dpi), 96);
-            mmi->ptMinTrackSize.y = MulDiv(450, static_cast<int>(dpi), 96);
-            return 0;
         }
         case WM_SIZE: {
             UpdateLayout(s);
@@ -3041,6 +3163,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 }
                 case IDC_STRINGS_UNIQUE: {
                     ApplyStringsFilterNow(s);
+                    return 0;
+                }
+                case IDC_STRINGS_PAGE_PREV: {
+                    if (s->stringsPageIndex > 0) {
+                        --s->stringsPageIndex;
+                        UpdateStringsDisplayCount(s);
+                        InvalidateRect(s->pageStrings, nullptr, TRUE);
+                        UpdateStringsDetail(s);
+                    }
+                    return 0;
+                }
+                case IDC_STRINGS_PAGE_NEXT: {
+                    if ((s->stringsPageIndex + 1) < s->stringsPageCount) {
+                        ++s->stringsPageIndex;
+                        UpdateStringsDisplayCount(s);
+                        InvalidateRect(s->pageStrings, nullptr, TRUE);
+                        UpdateStringsDetail(s);
+                    }
                     return 0;
                 }
                 case IDC_STRINGS_HISTORY_TAG0:
@@ -3336,6 +3476,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                     s->stringsUniqueCheck,
                                     s->stringsHistoryLabel,
                                     s->stringsHistoryClearBtn,
+                                    s->stringsPagePrev,
+                                    s->stringsPageNext,
+                                    s->stringsPageLabel,
                                     s->pageStrings};
                     for (HWND c : ctrls) {
                         if (c) {
@@ -3586,32 +3729,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
         case WM_DESTROY: {
-            WINDOWPLACEMENT wp = {};
-            wp.length = sizeof(wp);
-            if (GetWindowPlacement(hwnd, &wp)) {
-                std::wstring ini = GetPeInfoSettingsIniPath();
-                if (!ini.empty()) {
-                    RECT rc = wp.rcNormalPosition;
-                    int w = rc.right - rc.left;
-                    int h = rc.bottom - rc.top;
-                    int x = rc.left;
-                    int y = rc.top;
-                    int max = (wp.showCmd == SW_SHOWMAXIMIZED) ? 1 : 0;
-                    
-                    wchar_t buf[32];
-                    swprintf_s(buf, L"%d", w);
-                    WritePrivateProfileStringW(L"Window", L"Width", buf, ini.c_str());
-                    swprintf_s(buf, L"%d", h);
-                    WritePrivateProfileStringW(L"Window", L"Height", buf, ini.c_str());
-                    swprintf_s(buf, L"%d", x);
-                    WritePrivateProfileStringW(L"Window", L"X", buf, ini.c_str());
-                    swprintf_s(buf, L"%d", y);
-                    WritePrivateProfileStringW(L"Window", L"Y", buf, ini.c_str());
-                    swprintf_s(buf, L"%d", max);
-                    WritePrivateProfileStringW(L"Window", L"Maximized", buf, ini.c_str());
-                }
-            }
-
             KillTimer(hwnd, kTimerStringsHistorySave);
             if (s->stringsHistoryDirty) {
                 s->stringsHistory.Save();
@@ -3765,7 +3882,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
 
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
-    wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = kMainClassName;
@@ -3773,7 +3889,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     RegisterClassExW(&wc);
 
-    HWND hwnd = CreateWindowExW(0, kMainClassName, L"PEInfo v1.0", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+    HWND hwnd = CreateWindowExW(0, kMainClassName, L"PEInfo v1.0", WS_OVERLAPPEDWINDOW,
                                 CW_USEDEFAULT, CW_USEDEFAULT, 1100, 720,
                                 nullptr, nullptr, hInstance, &state);
     if (!hwnd) {
@@ -3781,29 +3897,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     }
     state.hwnd = hwnd;
 
-    bool restored = false;
-    std::wstring ini = GetPeInfoSettingsIniPath();
-    if (!ini.empty()) {
-        int w = GetPrivateProfileIntW(L"Window", L"Width", 0, ini.c_str());
-        int h = GetPrivateProfileIntW(L"Window", L"Height", 0, ini.c_str());
-        int x = GetPrivateProfileIntW(L"Window", L"X", -32000, ini.c_str());
-        int y = GetPrivateProfileIntW(L"Window", L"Y", -32000, ini.c_str());
-        int max = GetPrivateProfileIntW(L"Window", L"Maximized", 0, ini.c_str());
-
-        if (w > 0 && h > 0) {
-            if (x != -32000 && y != -32000) {
-                SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER);
-                restored = true;
-            } else {
-                SetWindowPos(hwnd, nullptr, 0, 0, w, h, SWP_NOZORDER | SWP_NOMOVE);
-            }
-            if (max) {
-                nCmdShow = SW_MAXIMIZE;
-            }
-        }
-    }
-
-    if (!restored && nCmdShow != SW_SHOWMAXIMIZED && nCmdShow != SW_MAXIMIZE && nCmdShow != SW_MINIMIZE && nCmdShow != SW_SHOWMINIMIZED && nCmdShow != SW_FORCEMINIMIZE) {
+    if (nCmdShow != SW_SHOWMAXIMIZED && nCmdShow != SW_MAXIMIZE && nCmdShow != SW_MINIMIZE && nCmdShow != SW_SHOWMINIMIZED && nCmdShow != SW_FORCEMINIMIZE) {
         CenterWindowOnWorkArea(hwnd);
     }
 
