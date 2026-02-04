@@ -2668,8 +2668,12 @@ static void UpdateLayout(GuiState* s) {
         if (contentW < MulDiv(120, static_cast<int>(s->dpi), 96)) {
             contentW = MulDiv(120, static_cast<int>(s->dpi), 96);
         }
+        int editMargin = MulDiv(8, static_cast<int>(s->dpi), 96);
+        int linkX = apad + editMargin;
+        int linkW = contentW - editMargin;
+        if (linkW < 0) linkW = 0;
         MoveWindow(s->aboutInfo, apad, apad, contentW, infoH, TRUE);
-        MoveWindow(s->aboutLink, apad, apad + infoH + agap, contentW, linkH, TRUE);
+        MoveWindow(s->aboutLink, linkX, apad + infoH + agap, linkW, linkH, TRUE);
     }
 
 }
