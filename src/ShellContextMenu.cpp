@@ -9,6 +9,11 @@
 static const wchar_t* kMenuKeyName = L"PEInfoGUI";
 
 static std::wstring BuildBaseKeyPathForExt(const wchar_t* ext) {
+    if (wcscmp(ext, L"*") == 0) {
+        std::wstring path = L"Software\\Classes\\*\\shell\\";
+        path += kMenuKeyName;
+        return path;
+    }
     std::wstring path = L"Software\\Classes\\SystemFileAssociations\\";
     path += ext;
     path += L"\\shell\\";
@@ -74,7 +79,7 @@ static void NotifyAssocChanged() {
 }
 
 bool IsPeInfoShellContextMenuInstalled() {
-    std::wstring keyPath = BuildBaseKeyPathForExt(L".exe");
+    std::wstring keyPath = BuildBaseKeyPathForExt(L"*");
     HKEY key = nullptr;
     LSTATUS st = RegOpenKeyExW(HKEY_CURRENT_USER, keyPath.c_str(), 0, KEY_READ, &key);
     if (st != ERROR_SUCCESS) {
@@ -85,7 +90,7 @@ bool IsPeInfoShellContextMenuInstalled() {
 }
 
 bool InstallPeInfoShellContextMenuForCurrentUser(const std::wstring& guiExePath, std::wstring& error) {
-    const std::array<const wchar_t*, 8> exts = {L".exe", L".dll", L".sys", L".ocx", L".node", L".cpl", L".scr", L".efi"};
+    const std::array<const wchar_t*, 1> exts = {L"*"};
     std::wstring displayName = L"\u7528 PEInfo \u6253\u5f00";
     std::wstring iconPath = guiExePath;
     std::wstring command = L"\"";
@@ -103,13 +108,24 @@ bool InstallPeInfoShellContextMenuForCurrentUser(const std::wstring& guiExePath,
 }
 
 bool UninstallPeInfoShellContextMenuForCurrentUser(std::wstring& error) {
-    const std::array<const wchar_t*, 8> exts = {L".exe", L".dll", L".sys", L".ocx", L".node", L".cpl", L".scr", L".efi"};
+    const std::array<const wchar_t*, 1> exts = {L"*"};
     for (const wchar_t* ext : exts) {
         std::wstring keyPath = BuildBaseKeyPathForExt(ext);
         if (!DeleteTreeIfExists(keyPath, error)) {
             return false;
         }
     }
+    
+    // Also try to cleanup old specific extensions if they exist
+    const std::array<const wchar_t*, 8> oldExts = {L".exe", L".dll", L".sys", L".ocx", L".node", L".cpl", L".scr", L".efi"};
+    for (const wchar_t* ext : oldExts) {
+        std::wstring keyPath = L"Software\\Classes\\SystemFileAssociations\\";
+        keyPath += ext;
+        keyPath += L"\\shell\\";
+        keyPath += kMenuKeyName;
+        DeleteTreeIfExists(keyPath, error); // Ignore errors for cleanup
+    }
+
     NotifyAssocChanged();
     return true;
 }

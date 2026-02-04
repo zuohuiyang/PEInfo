@@ -137,6 +137,7 @@ public:
     ~PEParser();
 
     bool LoadFile(const std::wstring& filePath);
+    bool IsLoaded() const { return !m_fileData.empty(); }
     void UnloadFile();
     
     bool IsValidPE() const { return m_isValidPE; }

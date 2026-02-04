@@ -73,21 +73,25 @@ bool AnalyzePeFile(const std::wstring& filePath, const PEAnalysisOptions& opt, P
     out = {};
     out.filePath = filePath;
 
-    if (!out.parser.LoadFile(filePath)) {
-        error = out.parser.GetLastError();
-        return false;
+    bool isPeValid = out.parser.LoadFile(filePath);
+    if (!isPeValid) {
+        if (!out.parser.IsLoaded()) {
+            error = out.parser.GetLastError();
+            return false;
+        }
+        // File loaded but not a valid PE. Continue for hash calculation only.
     }
 
-    if (opt.computePdb) {
+    if (isPeValid && opt.computePdb) {
         out.pdb = ExtractPdbInfo(out.parser);
     }
 
-    if (opt.computeSignaturePresence || opt.verifySignature) {
+    if (isPeValid && (opt.computeSignaturePresence || opt.verifySignature)) {
         out.signaturePresence = DetectSignaturePresence(filePath, out.parser);
         out.signaturePresenceReady = true;
     }
 
-    if (opt.verifySignature) {
+    if (isPeValid && opt.verifySignature) {
         SignatureSource effectiveSource = opt.sigSource;
         bool doEmbedded = (effectiveSource == SignatureSource::Embedded || effectiveSource == SignatureSource::Both || effectiveSource == SignatureSource::Auto);
         bool doCatalog = (effectiveSource == SignatureSource::Catalog || effectiveSource == SignatureSource::Both);
