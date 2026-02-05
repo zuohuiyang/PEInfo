@@ -361,6 +361,55 @@ static void CenterWindowOnWorkArea(HWND hwnd) {
     SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
+static bool TryReadIniInt(const std::wstring& ini, const wchar_t* section, const wchar_t* key, int& out) {
+    wchar_t buf[64] = {};
+    DWORD n = GetPrivateProfileStringW(section, key, L"", buf, static_cast<DWORD>(sizeof(buf) / sizeof(buf[0])), ini.c_str());
+    if (n == 0) {
+        return false;
+    }
+    wchar_t* end = nullptr;
+    long v = wcstol(buf, &end, 10);
+    if (end == buf) {
+        return false;
+    }
+    out = static_cast<int>(v);
+    return true;
+}
+
+static bool LoadWindowPlacementFromIni(int& x, int& y, int& w, int& h, bool& maximized) {
+    std::wstring ini = GetPeInfoSettingsIniPath();
+    if (ini.empty()) {
+        return false;
+    }
+    int rx = 0;
+    int ry = 0;
+    int rw = 0;
+    int rh = 0;
+    int rmax = 0;
+    if (!TryReadIniInt(ini, L"Window", L"Width", rw)) {
+        return false;
+    }
+    if (!TryReadIniInt(ini, L"Window", L"Height", rh)) {
+        return false;
+    }
+    if (!TryReadIniInt(ini, L"Window", L"X", rx)) {
+        return false;
+    }
+    if (!TryReadIniInt(ini, L"Window", L"Y", ry)) {
+        return false;
+    }
+    TryReadIniInt(ini, L"Window", L"Maximized", rmax);
+    if (rw <= 0 || rh <= 0) {
+        return false;
+    }
+    x = rx;
+    y = ry;
+    w = rw;
+    h = rh;
+    maximized = (rmax != 0);
+    return true;
+}
+
 static void SetWindowTextWString(HWND hwnd, const std::wstring& s) {
     SetWindowTextW(hwnd, s.c_str());
 }
@@ -3733,6 +3782,31 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
         case WM_DESTROY: {
+            WINDOWPLACEMENT wp = {};
+            wp.length = sizeof(wp);
+            if (GetWindowPlacement(hwnd, &wp)) {
+                std::wstring ini = GetPeInfoSettingsIniPath();
+                if (!ini.empty()) {
+                    RECT rc = wp.rcNormalPosition;
+                    int w = rc.right - rc.left;
+                    int h = rc.bottom - rc.top;
+                    int x = rc.left;
+                    int y = rc.top;
+                    int max = (wp.showCmd == SW_SHOWMAXIMIZED) ? 1 : 0;
+
+                    wchar_t buf[32];
+                    swprintf_s(buf, L"%d", w);
+                    WritePrivateProfileStringW(L"Window", L"Width", buf, ini.c_str());
+                    swprintf_s(buf, L"%d", h);
+                    WritePrivateProfileStringW(L"Window", L"Height", buf, ini.c_str());
+                    swprintf_s(buf, L"%d", x);
+                    WritePrivateProfileStringW(L"Window", L"X", buf, ini.c_str());
+                    swprintf_s(buf, L"%d", y);
+                    WritePrivateProfileStringW(L"Window", L"Y", buf, ini.c_str());
+                    swprintf_s(buf, L"%d", max);
+                    WritePrivateProfileStringW(L"Window", L"Maximized", buf, ini.c_str());
+                }
+            }
             KillTimer(hwnd, kTimerStringsHistorySave);
             if (s->stringsHistoryDirty) {
                 s->stringsHistory.Save();
@@ -3893,19 +3967,32 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     RegisterClassExW(&wc);
 
+    int winX = CW_USEDEFAULT;
+    int winY = CW_USEDEFAULT;
+    int winW = 1100;
+    int winH = 720;
+    bool winMaximized = false;
+    bool hasSavedWindow = LoadWindowPlacementFromIni(winX, winY, winW, winH, winMaximized);
+
     HWND hwnd = CreateWindowExW(0, kMainClassName, L"PEInfo v1.0", WS_OVERLAPPEDWINDOW,
-                                CW_USEDEFAULT, CW_USEDEFAULT, 1100, 720,
+                                winX, winY, winW, winH,
                                 nullptr, nullptr, hInstance, &state);
     if (!hwnd) {
         return 1;
     }
     state.hwnd = hwnd;
 
-    if (nCmdShow != SW_SHOWMAXIMIZED && nCmdShow != SW_MAXIMIZE && nCmdShow != SW_MINIMIZE && nCmdShow != SW_SHOWMINIMIZED && nCmdShow != SW_FORCEMINIMIZE) {
+    if (!hasSavedWindow && nCmdShow != SW_SHOWMAXIMIZED && nCmdShow != SW_MAXIMIZE && nCmdShow != SW_MINIMIZE && nCmdShow != SW_SHOWMINIMIZED && nCmdShow != SW_FORCEMINIMIZE) {
         CenterWindowOnWorkArea(hwnd);
     }
 
-    ShowWindow(hwnd, nCmdShow);
+    int showCmd = nCmdShow;
+    if (nCmdShow != SW_MINIMIZE && nCmdShow != SW_SHOWMINIMIZED && nCmdShow != SW_FORCEMINIMIZE) {
+        if (winMaximized) {
+            showCmd = SW_SHOWMAXIMIZED;
+        }
+    }
+    ShowWindow(hwnd, showCmd);
     UpdateWindow(hwnd);
 
     MSG msg = {};
