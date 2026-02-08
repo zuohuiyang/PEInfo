@@ -6,7 +6,7 @@
 
 ## 项目概述
 
-PEInfo 是一个 Windows C++ 图形界面（GUI）工具，用于分析单个 PE 文件并展示/导出结构化报告：导入/导出（含 Delay-Import）、PDB（RSDS）、时间戳展示、数字签名检测/验证，以及文件哈希（MD5/SHA1/SHA256）。核心解析与哈希逻辑模块化，可复用，符合 C++17 标准。
+PEInfo 是一个 Windows C++ 图形界面（GUI）工具，用于分析单个 PE 文件并展示结构化信息：导入/导出（含 Delay-Import）、PDB（RSDS）、时间戳、数字签名检测/验证，以及文件哈希（MD5/SHA1/SHA256）。核心解析与哈希逻辑模块化，可复用，符合 C++17 标准。
 
 ## 🎯 核心功能
 
@@ -16,10 +16,10 @@ PEInfo 是一个 Windows C++ 图形界面（GUI）工具，用于分析单个 PE
 - ✅ **Imports / Delay-Imports**：按 DLL 汇总并列出 API（支持截断/不截断）
 - ✅ **Exports**：导出函数列表
 - ✅ **PDB 信息**：解析 Debug Directory（RSDS GUID + Age + PDB Path）
-- ✅ **时间戳展示**：TimeDateStamp 支持 raw/utc/local 三种展示
-- ✅ **数字签名**：检测 embedded / catalog 签名并可验证（`--verify`），输出 signer/thumbprint 等信息
+- ✅ **时间戳展示**：TimeDateStamp 当前以本地时间展示
+- ✅ **数字签名**：检测 embedded / catalog 签名，并可在界面中触发验证
 - ✅ **文件哈希**：MD5/SHA1/SHA256（Windows CryptoAPI），支持显示耗时
-- ✅ **输出格式**：text/json，支持导出到文件（UTF-8）
+- ✅ **Strings 导出**：支持导出为 text/json（UTF-8）
 
 ## 🛠 技术规格
 
@@ -38,7 +38,7 @@ petools/
 ├── src/                        # 源码（PE 解析/报告/哈希/签名/GUI）
 ├── res/                        # 资源文件（manifest 等）
 ├── scripts/                    # 构建/打包脚本
-├── docs/                       # 设计与开发文档
+├── docs/                       # 待办清单
 └── README.md
 ```
 
@@ -49,14 +49,9 @@ petools/
 2. 选择 `Release` 配置和 `x86` 平台  
 3. 点击 `生成` -> `生成解决方案`
 
-### 方法2：命令行编译
-1. 打开 "Visual Studio 开发人员命令提示符"
-2. 导航到项目目录
-3. 运行：`msbuild PEInfo.sln /p:Configuration=Release /p:Platform=Win32`
-
-### 方法3：使用编译脚本
-1. 直接运行：`scripts\build.bat`
-2. 可选参数：`scripts\build.bat x64 Release`
+### 方法2：使用编译脚本
+1. 运行：`scripts\build.bat`（默认 Win32 Release）
+2. 如需 x64/Debug 等组合，可参考脚本内说明调整
 
 #### 产物路径（固定）
 - 可执行文件：`dist\<Platform>\<Configuration>\PEInfo.exe`
@@ -81,7 +76,7 @@ PEInfo 支持在程序内一键安装/卸载右键菜单项，便于从资源管
 
 ### 说明
 - 默认仅对当前用户生效（写入 HKCU），不需要管理员权限
-- 支持的扩展名：`.exe`、`.dll`、`.sys`、`.ocx`、`.node`、`.cpl`、`.scr`、`.efi`
+- 默认对所有文件类型生效（*），但用于 PE 文件最合适
 - Windows 11 下自定义项通常出现在“显示更多选项”（经典右键菜单）中
   - 若未立即生效，可重启资源管理器或重新登录
 
@@ -120,7 +115,7 @@ PEInfo 支持在程序内一键安装/卸载右键菜单项，便于从资源管
 
 ## 📚 相关文档
 
-- [工程设计总结](docs/ENGINEERING_SUMMARY.md) - 本地开发与编译/验证要点
+- [TODO](docs/TODO.md) - 待办清单
 
 ## 🎯 开发状态
 
@@ -128,28 +123,13 @@ PEInfo 支持在程序内一键安装/卸载右键菜单项，便于从资源管
 - 核心PE解析模块
 - 哈希计算模块  
 - 项目配置和编译脚本
-- 完整的文档和说明
+- 基本说明
 
 ⚠️ **待测试**：
 - 实际PE文件测试
 - 性能基准测试
 - 兼容性验证
 
-## 🔍 故障排除
-
-如果编译遇到问题：
-1. 检查Visual Studio是否正确安装C++工作负载
-2. 确认Windows SDK已安装
-3. 验证项目属性中的平台工具集设置
-4. 检查是否有中文路径或特殊字符问题
-
-## 📞 技术支持
-
-如有编译或功能问题，请提供：
-- Visual Studio版本
-- 具体的错误信息  
-- 操作系统版本
-- 测试用的PE文件（如需要）
 
 ## 📄 License
 
