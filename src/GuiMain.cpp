@@ -2877,11 +2877,39 @@ static void ApplyUiFontAndTheme(GuiState* s) {
     ListView_SetExtendedListViewStyleEx(s->pageStrings, ex, ex);
 }
 
-static LRESULT CALLBACK StringsListSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) {
+static LRESULT CALLBACK UiablockSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR);
+static void ApplyUiablockSubclass(HWND hwnd);
+
+static void ApplyUiablockSubclass(HWND hwnd) {
+    if (!hwnd) {
+        return;
+    }
+    SetWindowSubclass(hwnd, UiablockSubclassProc, 1, 0);
+}
+
+static LRESULT CALLBACK UiablockSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) {
     if (msg == WM_GETOBJECT) {
         return 0;
     }
+    if (msg == WM_PARENTNOTIFY) {
+        if (LOWORD(wParam) == WM_CREATE) {
+            HWND child = reinterpret_cast<HWND>(lParam);
+            ApplyUiablockSubclass(child);
+        }
+    }
     return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
+static BOOL CALLBACK ApplyUiablockEnumProc(HWND hwnd, LPARAM) {
+    ApplyUiablockSubclass(hwnd);
+    return TRUE;
+}
+
+static void ApplyUiablockToWindowTree(HWND root) {
+    if (!root) {
+        return;
+    }
+    EnumChildWindows(root, ApplyUiablockEnumProc, 0);
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -3028,7 +3056,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->stringsPagePrev = CreateWindowW(L"BUTTON", L"\u4e0a\u4e00\u9875", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_PAGE_PREV), nullptr, nullptr);
             s->stringsPageNext = CreateWindowW(L"BUTTON", L"\u4e0b\u4e00\u9875", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_PAGE_NEXT), nullptr, nullptr);
             s->stringsPageLabel = CreateWindowW(L"STATIC", L"", WS_CHILD | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_PAGE_LABEL), nullptr, nullptr);
-            SetWindowSubclass(s->pageStrings, StringsListSubclassProc, 1, 0);
+            ApplyUiablockToWindowTree(hwnd);
 
             auto colW = [&](int base) { return MulDiv(base, static_cast<int>(s->dpi), 96); };
             AddListViewColumn(s->pageHeaders, 0, colW(220), L"Field");
@@ -3100,6 +3128,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 StartAnalysis(s, path);
             }
             return 0;
+        }
+        case WM_PARENTNOTIFY: {
+            if (LOWORD(wParam) == WM_CREATE) {
+                HWND child = reinterpret_cast<HWND>(lParam);
+                ApplyUiablockSubclass(child);
+            }
+            break;
         }
         case WM_CTLCOLORBTN: {
             if (!s->bgBrush) {
