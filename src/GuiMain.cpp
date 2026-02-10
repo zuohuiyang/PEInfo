@@ -123,7 +123,11 @@ enum : UINT {
     IDM_STRINGS_HISTORY_PIN = 41012,
     IDM_STRINGS_HISTORY_UNPIN = 41013,
     IDM_STRINGS_HISTORY_DELETE = 41014,
-    IDM_HEADERS_COPY_ROW = 42001
+    IDM_HEADERS_COPY_ROW = 42001,
+    IDM_SECTIONS_COPY_ROW = 42002,
+    IDM_IMPORTS_DLLS_COPY_ROW = 42003,
+    IDM_IMPORTS_COPY_ROW = 42004,
+    IDM_EXPORTS_COPY_ROW = 42005
 };
 
 struct VerifyResultMessage {
@@ -458,6 +462,72 @@ static bool CopySelectedHeadersRow(HWND owner, HWND list) {
     ListView_GetItemText(list, sel, 1, v, static_cast<int>(std::size(v)));
     ListView_GetItemText(list, sel, 2, r, static_cast<int>(std::size(r)));
     std::wstring line = std::wstring(f) + L"\t" + v + L"\t" + r;
+    return CopyTextToClipboard(owner, line);
+}
+
+static bool CopySelectedSectionsRow(HWND owner, HWND list) {
+    int sel = ListView_GetNextItem(list, -1, LVNI_SELECTED);
+    if (sel < 0) {
+        return false;
+    }
+    wchar_t name[256] = {};
+    wchar_t rva[128] = {};
+    wchar_t vsize[128] = {};
+    wchar_t rawOff[128] = {};
+    wchar_t rawSize[128] = {};
+    wchar_t chars[256] = {};
+    ListView_GetItemText(list, sel, 0, name, static_cast<int>(std::size(name)));
+    ListView_GetItemText(list, sel, 1, rva, static_cast<int>(std::size(rva)));
+    ListView_GetItemText(list, sel, 2, vsize, static_cast<int>(std::size(vsize)));
+    ListView_GetItemText(list, sel, 3, rawOff, static_cast<int>(std::size(rawOff)));
+    ListView_GetItemText(list, sel, 4, rawSize, static_cast<int>(std::size(rawSize)));
+    ListView_GetItemText(list, sel, 5, chars, static_cast<int>(std::size(chars)));
+    std::wstring line = std::wstring(name) + L"\t" + rva + L"\t" + vsize + L"\t" + rawOff + L"\t" + rawSize + L"\t" + chars;
+    return CopyTextToClipboard(owner, line);
+}
+
+static bool CopySelectedImportsDllsRow(HWND owner, HWND list) {
+    int sel = ListView_GetNextItem(list, -1, LVNI_SELECTED);
+    if (sel < 0) {
+        return false;
+    }
+    wchar_t dll[512] = {};
+    wchar_t count[128] = {};
+    ListView_GetItemText(list, sel, 0, dll, static_cast<int>(std::size(dll)));
+    ListView_GetItemText(list, sel, 1, count, static_cast<int>(std::size(count)));
+    std::wstring line = std::wstring(dll) + L"\t" + count;
+    return CopyTextToClipboard(owner, line);
+}
+
+static bool CopySelectedImportsRow(HWND owner, HWND list) {
+    int sel = ListView_GetNextItem(list, -1, LVNI_SELECTED);
+    if (sel < 0) {
+        return false;
+    }
+    wchar_t type[128] = {};
+    wchar_t func[1024] = {};
+    ListView_GetItemText(list, sel, 0, type, static_cast<int>(std::size(type)));
+    ListView_GetItemText(list, sel, 1, func, static_cast<int>(std::size(func)));
+    std::wstring line = std::wstring(type) + L"\t" + func;
+    return CopyTextToClipboard(owner, line);
+}
+
+static bool CopySelectedExportsRow(HWND owner, HWND list) {
+    int sel = ListView_GetNextItem(list, -1, LVNI_SELECTED);
+    if (sel < 0) {
+        return false;
+    }
+    wchar_t ordinal[128] = {};
+    wchar_t rva[128] = {};
+    wchar_t offset[128] = {};
+    wchar_t name[1024] = {};
+    wchar_t forwarder[1024] = {};
+    ListView_GetItemText(list, sel, 0, ordinal, static_cast<int>(std::size(ordinal)));
+    ListView_GetItemText(list, sel, 1, rva, static_cast<int>(std::size(rva)));
+    ListView_GetItemText(list, sel, 2, offset, static_cast<int>(std::size(offset)));
+    ListView_GetItemText(list, sel, 3, name, static_cast<int>(std::size(name)));
+    ListView_GetItemText(list, sel, 4, forwarder, static_cast<int>(std::size(forwarder)));
+    std::wstring line = std::wstring(ordinal) + L"\t" + rva + L"\t" + offset + L"\t" + name + L"\t" + forwarder;
     return CopyTextToClipboard(owner, line);
 }
 
@@ -3336,6 +3406,22 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     CopySelectedHeadersRow(hwnd, s->pageHeaders);
                     return 0;
                 }
+                case IDM_SECTIONS_COPY_ROW: {
+                    CopySelectedSectionsRow(hwnd, s->pageSections);
+                    return 0;
+                }
+                case IDM_IMPORTS_DLLS_COPY_ROW: {
+                    CopySelectedImportsDllsRow(hwnd, s->pageImportsDlls);
+                    return 0;
+                }
+                case IDM_IMPORTS_COPY_ROW: {
+                    CopySelectedImportsRow(hwnd, s->pageImports);
+                    return 0;
+                }
+                case IDM_EXPORTS_COPY_ROW: {
+                    CopySelectedExportsRow(hwnd, s->pageExports);
+                    return 0;
+                }
                 case IDM_STRINGS_COPY_TEXT: {
                     auto idx = GetSelectedStringsRowIndex(s);
                     if (idx.has_value() && *idx >= 0 && *idx < static_cast<int>(s->stringsAllRows.size())) {
@@ -3476,6 +3562,126 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 DestroyMenu(menu);
                 return 0;
             }
+            if (src == s->pageSections) {
+                POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                if (pt.x != -1 && pt.y != -1) {
+                    POINT clientPt = pt;
+                    ScreenToClient(s->pageSections, &clientPt);
+                    LVHITTESTINFO ht = {};
+                    ht.pt = clientPt;
+                    int hit = ListView_SubItemHitTest(s->pageSections, &ht);
+                    if (hit >= 0) {
+                        ListView_SetItemState(s->pageSections, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+                        ListView_SetItemState(s->pageSections, hit, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+                    }
+                } else {
+                    int sel = ListView_GetNextItem(s->pageSections, -1, LVNI_SELECTED);
+                    if (sel >= 0) {
+                        RECT rc = {};
+                        ListView_GetItemRect(s->pageSections, sel, &rc, LVIR_BOUNDS);
+                        POINT p = {rc.left, rc.bottom};
+                        ClientToScreen(s->pageSections, &p);
+                        pt = p;
+                    } else {
+                        GetCursorPos(&pt);
+                    }
+                }
+                HMENU menu = CreatePopupMenu();
+                AppendMenuW(menu, MF_STRING, IDM_SECTIONS_COPY_ROW, L"\u590d\u5236\u884c");
+                TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+                DestroyMenu(menu);
+                return 0;
+            }
+            if (src == s->pageImportsDlls) {
+                POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                if (pt.x != -1 && pt.y != -1) {
+                    POINT clientPt = pt;
+                    ScreenToClient(s->pageImportsDlls, &clientPt);
+                    LVHITTESTINFO ht = {};
+                    ht.pt = clientPt;
+                    int hit = ListView_SubItemHitTest(s->pageImportsDlls, &ht);
+                    if (hit >= 0) {
+                        ListView_SetItemState(s->pageImportsDlls, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+                        ListView_SetItemState(s->pageImportsDlls, hit, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+                    }
+                } else {
+                    int sel = ListView_GetNextItem(s->pageImportsDlls, -1, LVNI_SELECTED);
+                    if (sel >= 0) {
+                        RECT rc = {};
+                        ListView_GetItemRect(s->pageImportsDlls, sel, &rc, LVIR_BOUNDS);
+                        POINT p = {rc.left, rc.bottom};
+                        ClientToScreen(s->pageImportsDlls, &p);
+                        pt = p;
+                    } else {
+                        GetCursorPos(&pt);
+                    }
+                }
+                HMENU menu = CreatePopupMenu();
+                AppendMenuW(menu, MF_STRING, IDM_IMPORTS_DLLS_COPY_ROW, L"\u590d\u5236\u884c");
+                TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+                DestroyMenu(menu);
+                return 0;
+            }
+            if (src == s->pageImports) {
+                POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                if (pt.x != -1 && pt.y != -1) {
+                    POINT clientPt = pt;
+                    ScreenToClient(s->pageImports, &clientPt);
+                    LVHITTESTINFO ht = {};
+                    ht.pt = clientPt;
+                    int hit = ListView_SubItemHitTest(s->pageImports, &ht);
+                    if (hit >= 0) {
+                        ListView_SetItemState(s->pageImports, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+                        ListView_SetItemState(s->pageImports, hit, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+                    }
+                } else {
+                    int sel = ListView_GetNextItem(s->pageImports, -1, LVNI_SELECTED);
+                    if (sel >= 0) {
+                        RECT rc = {};
+                        ListView_GetItemRect(s->pageImports, sel, &rc, LVIR_BOUNDS);
+                        POINT p = {rc.left, rc.bottom};
+                        ClientToScreen(s->pageImports, &p);
+                        pt = p;
+                    } else {
+                        GetCursorPos(&pt);
+                    }
+                }
+                HMENU menu = CreatePopupMenu();
+                AppendMenuW(menu, MF_STRING, IDM_IMPORTS_COPY_ROW, L"\u590d\u5236\u884c");
+                TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+                DestroyMenu(menu);
+                return 0;
+            }
+            if (src == s->pageExports) {
+                POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                if (pt.x != -1 && pt.y != -1) {
+                    POINT clientPt = pt;
+                    ScreenToClient(s->pageExports, &clientPt);
+                    LVHITTESTINFO ht = {};
+                    ht.pt = clientPt;
+                    int hit = ListView_SubItemHitTest(s->pageExports, &ht);
+                    if (hit >= 0) {
+                        ListView_SetItemState(s->pageExports, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+                        ListView_SetItemState(s->pageExports, hit, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+                    }
+                } else {
+                    int sel = ListView_GetNextItem(s->pageExports, -1, LVNI_SELECTED);
+                    if (sel >= 0) {
+                        RECT rc = {};
+                        ListView_GetItemRect(s->pageExports, sel, &rc, LVIR_BOUNDS);
+                        POINT p = {rc.left, rc.bottom};
+                        ClientToScreen(s->pageExports, &p);
+                        pt = p;
+                    } else {
+                        GetCursorPos(&pt);
+                    }
+                }
+                HMENU menu = CreatePopupMenu();
+                AppendMenuW(menu, MF_STRING, IDM_EXPORTS_COPY_ROW, L"\u590d\u5236\u884c");
+                TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+                DestroyMenu(menu);
+                return 0;
+            }
             if (src != s->pageStrings) {
                 break;
             }
@@ -3590,6 +3796,34 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 auto* kd = reinterpret_cast<NMLVKEYDOWN*>(lParam);
                 if (kd->wVKey == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) {
                     CopySelectedHeadersRow(hwnd, s->pageHeaders);
+                    return 0;
+                }
+            }
+            if (nm->hwndFrom == s->pageSections && nm->code == LVN_KEYDOWN) {
+                auto* kd = reinterpret_cast<NMLVKEYDOWN*>(lParam);
+                if (kd->wVKey == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+                    CopySelectedSectionsRow(hwnd, s->pageSections);
+                    return 0;
+                }
+            }
+            if (nm->hwndFrom == s->pageImportsDlls && nm->code == LVN_KEYDOWN) {
+                auto* kd = reinterpret_cast<NMLVKEYDOWN*>(lParam);
+                if (kd->wVKey == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+                    CopySelectedImportsDllsRow(hwnd, s->pageImportsDlls);
+                    return 0;
+                }
+            }
+            if (nm->hwndFrom == s->pageImports && nm->code == LVN_KEYDOWN) {
+                auto* kd = reinterpret_cast<NMLVKEYDOWN*>(lParam);
+                if (kd->wVKey == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+                    CopySelectedImportsRow(hwnd, s->pageImports);
+                    return 0;
+                }
+            }
+            if (nm->hwndFrom == s->pageExports && nm->code == LVN_KEYDOWN) {
+                auto* kd = reinterpret_cast<NMLVKEYDOWN*>(lParam);
+                if (kd->wVKey == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+                    CopySelectedExportsRow(hwnd, s->pageExports);
                     return 0;
                 }
             }
