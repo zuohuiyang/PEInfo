@@ -74,6 +74,8 @@ enum : UINT {
     IDC_EXPORTS_FILTER = 2102,
     IDC_EXPORTS_INFO = 2103,
     IDC_EXPORTS_SEPARATOR = 2104,
+    IDC_IMPORTS_STATS = 2105,
+    IDC_EXPORTS_STATS = 2106,
     IDC_STRINGS_SEARCH = 2201,
     IDC_STRINGS_TYPE = 2202,
     IDC_STRINGS_MINLEN = 2203,
@@ -184,6 +186,8 @@ struct GuiState {
     HWND exportsFilterEdit = nullptr;
     HWND exportsInfo = nullptr;
     HWND exportsSeparator = nullptr;
+    HWND importsStats = nullptr;
+    HWND exportsStats = nullptr;
     HWND stringsSearchLabel = nullptr;
     HWND stringsSearchEdit = nullptr;
     HWND stringsRegexCheck = nullptr;
@@ -308,6 +312,8 @@ static UINT GetBestWindowDpi(HWND hwnd);
 static HFONT CreateUiFontForDpi(UINT dpi);
 static void FitImportsDllColumns(GuiState* s);
 static void FitImportsFuncColumns(GuiState* s);
+static void UpdateImportsStats(GuiState* s, size_t filteredDlls, size_t filteredFuncs);
+static void UpdateExportsStats(GuiState* s, size_t filteredExports);
 static void UpdateStringsDisplayCount(GuiState* s);
 static void ApplyStringsFilterNow(GuiState* s);
 
@@ -870,6 +876,31 @@ static std::wstring BuildExportsInfoText(const PEParser& parser) {
     return out.str();
 }
 
+static void UpdateImportsStats(GuiState* s, size_t filteredDlls, size_t filteredFuncs) {
+    if (!s || !s->importsStats) {
+        return;
+    }
+    std::map<std::wstring, int> totalDllCounts;
+    for (const auto& r : s->importsAllRows) {
+        ++totalDllCounts[r.dll];
+    }
+    size_t totalDlls = totalDllCounts.size();
+    size_t totalFuncs = s->importsAllRows.size();
+    std::wostringstream out;
+    out << L"DLL: " << filteredDlls << L" / " << totalDlls << L"  \u51fd\u6570: " << filteredFuncs << L" / " << totalFuncs;
+    SetWindowTextWString(s->importsStats, out.str());
+}
+
+static void UpdateExportsStats(GuiState* s, size_t filteredExports) {
+    if (!s || !s->exportsStats) {
+        return;
+    }
+    size_t totalExports = s->exportsAllRows.size();
+    std::wostringstream out;
+    out << L"\u5bfc\u51fa\u51fd\u6570: " << filteredExports << L" / " << totalExports;
+    SetWindowTextWString(s->exportsStats, out.str());
+}
+
 static void ApplyImportsFilterNow(GuiState* s) {
     if (!s->importsFilterEdit) {
         return;
@@ -904,6 +935,7 @@ static void ApplyImportsFilterNow(GuiState* s) {
         dllRows.push_back({it.first, it.second});
     }
     PopulateImportDlls(s->pageImportsDlls, dllRows);
+    UpdateImportsStats(s, dllCounts.size(), matched.size());
 
     if (dllRows.empty()) {
         s->importsSelectedDll.clear();
@@ -972,6 +1004,7 @@ static void ApplyExportsFilterNow(GuiState* s) {
         SetListViewText(s->pageExports, outRow, 4, r.forwarder);
         ++outRow;
     }
+    UpdateExportsStats(s, static_cast<size_t>(outRow));
 
     if (s->exportsInfo) {
         if (qLower.empty()) {
@@ -1091,8 +1124,9 @@ static void UpdateStringsDisplayCount(GuiState* s) {
     if (!s || !s->pageStrings) {
         return;
     }
-    size_t total = s->stringsVisibleAll.size();
-    size_t displayLimit = total;
+    size_t filteredTotal = s->stringsVisibleAll.size();
+    size_t totalAll = s->stringsAllRows.size();
+    size_t displayLimit = filteredTotal;
     if (displayLimit > kStringsUiMaxRows) {
         displayLimit = kStringsUiMaxRows;
     }
@@ -1143,13 +1177,11 @@ static void UpdateStringsDisplayCount(GuiState* s) {
     if (s->stringsPageLabel) {
         std::wostringstream out;
         if (displayLimit == 0) {
-            out << L"0 / 0";
+            out << L"0 / 0  \u603b\u8ba1 " << totalAll << L"  \u8fc7\u6ee4\u540e " << filteredTotal;
         } else {
             out << L"\u7b2c " << (s->stringsPageIndex + 1) << L" / " << pageCount << L" \u9875";
             out << L"  \u663e\u793a " << (pageStart + 1) << L"-" << pageEnd << L" / " << displayLimit;
-            if (total > displayLimit) {
-                out << L"  \u603b " << total;
-            }
+            out << L"  \u603b\u8ba1 " << totalAll << L"  \u8fc7\u6ee4\u540e " << filteredTotal;
         }
         SetWindowTextWString(s->stringsPageLabel, out.str());
     }
@@ -1981,11 +2013,13 @@ static void ShowOnlyTab(GuiState* s, TabIndex idx) {
     ShowWindow(s->pageImportsDlls, showImportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->importsFilterLabel, showImportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->importsFilterEdit, showImportsFilter ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->importsStats, showImportsFilter ? SW_SHOW : SW_HIDE);
     bool showExportsFilter = (idx == TabIndex::Exports);
     ShowWindow(s->exportsFilterLabel, showExportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->exportsFilterEdit, showExportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->exportsInfo, showExportsFilter ? SW_SHOW : SW_HIDE);
     ShowWindow(s->exportsSeparator, showExportsFilter ? SW_SHOW : SW_HIDE);
+    ShowWindow(s->exportsStats, showExportsFilter ? SW_SHOW : SW_HIDE);
     bool showStringsControls = (idx == TabIndex::Strings);
     ShowWindow(s->stringsSearchLabel, showStringsControls ? SW_SHOW : SW_HIDE);
     ShowWindow(s->stringsSearchEdit, showStringsControls ? SW_SHOW : SW_HIDE);
@@ -2046,6 +2080,8 @@ static void RefreshAllViews(GuiState* s) {
         ListView_DeleteAllItems(s->pageImports);
         ListView_DeleteAllItems(s->pageExports);
         SetWindowTextWString(s->exportsInfo, L"");
+        UpdateImportsStats(s, 0, 0);
+        UpdateExportsStats(s, 0);
         ListView_SetItemCountEx(s->pageStrings, 0, LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
         s->importsAllRows.clear();
         s->exportsAllRows.clear();
@@ -2709,22 +2745,22 @@ static void UpdateLayout(GuiState* s) {
 
     int pageGap = MulDiv(6, static_cast<int>(s->dpi), 96);
     int pageBtnW = MulDiv(72, static_cast<int>(s->dpi), 96);
-    int pageLabelW = MulDiv(200, static_cast<int>(s->dpi), 96);
     int pageRightX = pageRc.left + pageW;
     int pageNextX = pageRightX - pageBtnW;
     int pagePrevX = pageNextX - pageGap - pageBtnW;
-    int pageLabelX = pagePrevX - pageGap - pageLabelW;
-    if (pageLabelX < pageRc.left) {
-        pageLabelX = pageRc.left;
-        pageLabelW = pagePrevX - pageGap - pageLabelX;
-        if (pageLabelW < 0) pageLabelW = 0;
-    }
+    int pageLabelX = pageRc.left;
+    int pageLabelW = pagePrevX - pageGap - pageLabelX;
+    if (pageLabelW < 0) pageLabelW = 0;
     MoveWindow(s->stringsPagePrev, pagePrevX, stringsPageBarY, pageBtnW, stringsPageBarH, TRUE);
     MoveWindow(s->stringsPageNext, pageNextX, stringsPageBarY, pageBtnW, stringsPageBarH, TRUE);
     MoveWindow(s->stringsPageLabel, pageLabelX, stringsPageBarY, pageLabelW, stringsPageBarH, TRUE);
 
+    int statsH = filterH;
+    int statsGap = pad;
     int importsY = pageRc.top + filterH + pad;
-    int importsH = pageH - filterH - pad;
+    int importsH = pageH - filterH - pad - statsGap - statsH;
+    if (importsH < 0) importsH = 0;
+    int importsStatsY = pageRc.top + pageH - statsH;
     int splitGap = pad;
     int minLeftW = MulDiv(220, static_cast<int>(s->dpi), 96);
     int minRightW = MulDiv(240, static_cast<int>(s->dpi), 96);
@@ -2737,6 +2773,7 @@ static void UpdateLayout(GuiState* s) {
 
     MoveWindow(s->pageImportsDlls, pageRc.left, importsY, leftW, importsH, TRUE);
     MoveWindow(s->pageImports, pageRc.left + leftW + splitGap, importsY, rightW, importsH, TRUE);
+    MoveWindow(s->importsStats, pageRc.left, importsStatsY, pageW, statsH, TRUE);
     FitImportsDllColumns(s);
     FitImportsFuncColumns(s);
     InvalidateRect(s->pageImportsDlls, nullptr, TRUE);
@@ -2752,22 +2789,24 @@ static void UpdateLayout(GuiState* s) {
     int exportsInfoY = pageRc.top;
     int exportsSearchY = exportsInfoY + exportsInfoH + sepGapY + sepH + sepGapY;
     int exportsListY = exportsSearchY + filterH + pad;
-    int exportsListH = pageH - (exportsListY - pageRc.top);
+    int exportsListH = pageH - (exportsListY - pageRc.top) - statsGap - statsH;
     if (exportsListH < exportsListMinH) {
-        exportsInfoH = pageH - (sepGapY + sepH + sepGapY + filterH + pad + exportsListMinH);
+        exportsInfoH = pageH - (sepGapY + sepH + sepGapY + filterH + pad + exportsListMinH + statsGap + statsH);
         if (exportsInfoH < exportsInfoMinH) exportsInfoH = exportsInfoMinH;
         exportsSearchY = exportsInfoY + exportsInfoH + sepGapY + sepH + sepGapY;
         exportsListY = exportsSearchY + filterH + pad;
-        exportsListH = pageH - (exportsListY - pageRc.top);
+        exportsListH = pageH - (exportsListY - pageRc.top) - statsGap - statsH;
     }
     if (exportsListH < 0) exportsListH = 0;
 
     int exportsSepY = exportsInfoY + exportsInfoH + sepGapY;
+    int exportsStatsY = pageRc.top + pageH - statsH;
     MoveWindow(s->exportsInfo, pageRc.left, exportsInfoY, pageW, exportsInfoH, TRUE);
     MoveWindow(s->exportsSeparator, pageRc.left, exportsSepY, pageW, sepH, TRUE);
     MoveWindow(s->exportsFilterLabel, filterX, exportsSearchY, filterLabelW, filterH, TRUE);
     MoveWindow(s->exportsFilterEdit, filterEditX, exportsSearchY, filterEditW, filterH, TRUE);
     MoveWindow(s->pageExports, pageRc.left, exportsListY, pageW, exportsListH, TRUE);
+    MoveWindow(s->exportsStats, pageRc.left, exportsStatsY, pageW, statsH, TRUE);
     MoveWindow(s->pageStrings, pageRc.left, stringsListY, pageW, stringsListH, TRUE);
     MoveWindow(s->pageResources, pageRc.left, pageRc.top, pageW, pageH, TRUE);
     MoveWindow(s->pagePdb, pageRc.left, pageRc.top, pageW, pageH, TRUE);
@@ -2882,6 +2921,8 @@ static void ApplyUiFontAndTheme(GuiState* s) {
         s->exportsFilterLabel,
         s->exportsFilterEdit,
         s->exportsInfo,
+        s->importsStats,
+        s->exportsStats,
         s->stringsSearchLabel,
         s->stringsSearchEdit,
         s->stringsRegexCheck,
@@ -3098,6 +3139,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             s->exportsFilterEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", filterEditStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS_FILTER), nullptr, nullptr);
             s->exportsInfo = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_READONLY, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS_INFO), nullptr, nullptr);
             s->exportsSeparator = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS_SEPARATOR), nullptr, nullptr);
+            s->importsStats = CreateWindowW(L"STATIC", L"", WS_CHILD | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_IMPORTS_STATS), nullptr, nullptr);
+            s->exportsStats = CreateWindowW(L"STATIC", L"", WS_CHILD | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_EXPORTS_STATS), nullptr, nullptr);
 
             s->stringsSearchLabel = CreateWindowW(L"STATIC", L"\uE721", filterLabelStyle, 0, 0, 0, 0, hwnd, nullptr, nullptr, nullptr);
             s->stringsSearchEdit = CreateWindowExW(WS_EX_STATICEDGE, L"EDIT", L"", filterEditStyle, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_SEARCH), nullptr, nullptr);
@@ -3125,7 +3168,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             s->stringsPagePrev = CreateWindowW(L"BUTTON", L"\u4e0a\u4e00\u9875", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_PAGE_PREV), nullptr, nullptr);
             s->stringsPageNext = CreateWindowW(L"BUTTON", L"\u4e0b\u4e00\u9875", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_PAGE_NEXT), nullptr, nullptr);
-            s->stringsPageLabel = CreateWindowW(L"STATIC", L"", WS_CHILD | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_PAGE_LABEL), nullptr, nullptr);
+            s->stringsPageLabel = CreateWindowW(L"STATIC", L"", WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_ENDELLIPSIS, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STRINGS_PAGE_LABEL), nullptr, nullptr);
             ApplyUiablockToWindowTree(hwnd);
 
             auto colW = [&](int base) { return MulDiv(base, static_cast<int>(s->dpi), 96); };
